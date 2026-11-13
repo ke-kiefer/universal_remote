@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Inbox – Universal Remote{% endblock %}
+{% block content %}
+<form method="post" id="f">
+  <div class="bar">
+    <div class="picker">
+      <input id="filter" placeholder="Entity filtern (Name, Raum, ID) …" autocomplete="off">
+      <select name="entity_id" id="entity" size="10" required>
+        {% set ns = namespace(area=None) %}
+        {% for e in entities %}
+          {% if e.area != ns.area %}
+            {% if not loop.first %}</optgroup>{% endif %}
+            <optgroup label="{{ e.area or 'Ohne Raum' }}">
+            {% set ns.area = e.area %}
+          {% endif %}
+          <option value="{{ e.entity_id }}" data-search="{{ (e.name ~ ' ' ~ (e.area or '') ~ ' ' ~ e.entity_id)|lower }}">
+            {{ e.name }} — {{ e.entity_id }}{% if counts.get(e.entity_id) %} ({{ counts[e.entity_id] }}){% endif %}
+          </option>
+          {% if loop.last %}</optgroup>{% endif %}
+        {% endfor %}
+        {% if not entities %}
+          {% for eid in counts %}<option value="{{ eid }}">{{ eid }} ({{ counts[eid] }})</option>{% endfor %}
+        {% endif %}
+      </select>
+      {% if not entities %}
+        <input id="manual" placeholder="oder Entity-ID eintippen, z. B. light.wohnzimmer" autocomplete="off">
+      {% endif %}
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px">
+      <button type="submit" class="primary" formaction="/label/assign">Ausgewählte zuweisen</button>
+      <button type="submit" class="danger" formaction="/label/reject" formnovalidate>Ausgewählte verwerfen</button>
+      <button type="button" id="all">Alle auswählen</button>
+      <span class="muted"><span id="n">0</span> von {{ ids|length }} ausgewählt</span>
+    </div>
+  </div>
+
+  {% if not ids %}
+    <p class="muted">Die Inbox ist leer. Bilder kommen per <code>POST /api/capture</code> (Trainingsmodus der Fernbedienung oder curl).</p>
+  {% endif %}
+  <div class="grid">
+    {% for id in ids %}
+      <label class="card">
+        <input type="checkbox" name="ids" value="{{ id }}">
+        <img loading="lazy" src="/label/img/inbox/{{ id }}.jpg?thumb=1" alt="">
+        <div class="cap"><span>{{ id[:15] }}</span><a href="/label/img/inbox/{{ id }}.jpg" target="_blank" onclick="event.stopPropagation()">groß</a></div>
+      </label>
+    {% endfor %}
+  </div>
+</form>
+<script>
+  const boxes = [...document.querySelectorAll('input[name=ids]')];
+  const n = document.getElementById('n');
+  const upd = () => n.textContent = boxes.filter(b => b.checked).length;
+  boxes.forEach(b => b.addEventListener('change', upd));
+  document.getElementById('all').onclick = () => {
+    const on = !boxes.every(b => b.checked); boxes.forEach(b => b.checked = on); upd();
+  };
+  const filter = document.getElementById('filter'), sel = document.getElementById('entity');
+  filter.addEventListener('input', () => {
+    const q = filter.value.toLowerCase().trim();
+    sel.querySelectorAll('optgroup').forEach(g => {
+      let any = false;
+      g.querySelectorAll('option').forEach(o => {
+        const hit = !q || (o.dataset.search || o.value).includes(q);
+        o.hidden = !hit; any ||= hit;
+      });
+      g.hidden = !any;
+    });
+  });
+  // Manual entity id (when HA is unreachable) overrides the list.
+  const manual = document.getElementById('manual');
+  if (manual) {
+    manual.addEventListener('input', () => {
+      const v = manual.value.trim();
+      manual.name = v ? 'entity_id' : '';
+      sel.required = !v; sel.disabled = !!v;
+    });
+  }
+</script>
+{% endblock %}

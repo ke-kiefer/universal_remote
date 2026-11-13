@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Entities – Universal Remote{% endblock %}
+{% block content %}
+<section>
+  <h2>Index</h2>
+  <p>
+    {{ index.n_images }} Bilder, {{ index.n_entities }} Entities, gebaut {{ index.created or "–" }}<br>
+    <span class="muted">Modell <code>{{ config.model }}</code>, Eingabe <code>{{ config.input_size }}</code>,
+    Skalen <code>{{ config.scales }}</code>, Pooling <code>{{ config.pooling }}</code>.
+    Schwellwerte: match ≥ {{ settings.match_threshold }}, Abstand ≥ {{ settings.margin_threshold }},
+    unknown &lt; {{ settings.unknown_threshold }}</span>
+  </p>
+  <form method="post" style="display:flex; gap:10px">
+    <button class="primary" formaction="/admin/reindex">Index neu bauen</button>
+    <button formaction="/admin/eval">Evaluation ausführen</button>
+  </form>
+</section>
+
+<section>
+  <h2>Entities</h2>
+  {% if rows %}
+  <table>
+    <tr><th>Entity</th><th>Name</th><th>Raum</th><th class="num">Bilder</th></tr>
+    {% for r in rows %}
+      <tr>
+        <td><a href="/label/entity/{{ r.entity_id }}"><code>{{ r.entity_id }}</code></a>
+          {% if r.missing %}<span style="color:var(--bad)" title="Entity existiert nicht (mehr) in HA">⚠</span>{% endif %}</td>
+        <td>{{ r.name }}</td><td>{{ r.area or "" }}</td>
+        <td class="num" {% if r.count < 10 %}style="color:var(--warn)" title="Empfehlung: 10–30 Bilder"{% endif %}>{{ r.count }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p class="muted">Noch keine gelabelten Bilder.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Letzte Evaluation</h2>
+  {% if eval and not eval.error %}
+    <p>{{ eval.created }}: {{ eval.n_images }} Bilder, {{ eval.n_entities }} Entities.
+      Top-1 <b>{{ "%.1f"|format(eval.top1_accuracy * 100) }} %</b>,
+      Top-3 {{ "%.1f"|format(eval.top3_accuracy * 100) }} %.
+      <span class="muted">Konfiguration: {{ eval.config }}</span></p>
+    {% if eval.suggestion %}
+      <p>Vorschlag Schwellwerte: <code>MATCH_THRESHOLD={{ eval.suggestion.match_threshold }}</code>
+      <code>MARGIN_THRESHOLD={{ eval.suggestion.margin_threshold }}</code>
+      <code>UNKNOWN_THRESHOLD={{ eval.suggestion.unknown_threshold }}</code>
+      <span class="muted">({{ eval.suggestion.note }})</span></p>
+    {% endif %}
+    <h3>Mit aktuellen Schwellwerten</h3>
+    <table>
+      <tr><th>Status</th><th class="num">Anteil</th><th class="num">davon richtig</th></tr>
+      {% for k, v in eval.current_thresholds.items() %}
+        <tr><td>{{ k }}</td><td class="num">{{ "%.0f"|format(v.share * 100) }} %</td>
+          <td class="num">{{ "%.0f"|format(v.correct * 100) if v.correct is not none else "–" }} %</td></tr>
+      {% endfor %}
+    </table>
+    {% if eval.confusions %}
+      <h3>Verwechslungen</h3>
+      <table>
+        <tr><th>Wahr</th><th>Erkannt als</th><th class="num">Anzahl</th></tr>
+        {% for c in eval.confusions %}
+          <tr><td><code>{{ c.true }}</code></td><td><code>{{ c.predicted }}</code></td><td class="num">{{ c.count }}</td></tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+  {% elif eval and eval.error %}
+    <p class="muted">{{ eval.error }}</p>
+  {% else %}
+    <p class="muted">Noch keine Evaluation. Braucht mindestens 2 Entities mit je 2 Bildern.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ entity_id }} – Universal Remote{% endblock %}
+{% block content %}
+<h2><code>{{ entity_id }}</code> <span class="muted">({{ images|length }} Bilder)</span></h2>
+<form method="post" action="/label/delete">
+  <input type="hidden" name="entity_id" value="{{ entity_id }}">
+  <div class="bar">
+    <button type="submit" class="danger" onclick="return confirm('Ausgewählte Bilder endgültig löschen?')">Ausgewählte löschen</button>
+    <a class="btn" href="/label/entities">Zurück</a>
+  </div>
+  <div class="grid">
+    {% for rel in images %}
+      {% set id = rel.rsplit('/', 1)[1][:-4] %}
+      <label class="card">
+        <input type="checkbox" name="ids" value="{{ id }}">
+        <img loading="lazy" src="/label/img/{{ rel }}?thumb=1" alt="">
+        <div class="cap"><span>{{ id[:15] }}</span><a href="/label/img/{{ rel }}" target="_blank" onclick="event.stopPropagation()">groß</a></div>
+      </label>
+    {% endfor %}
+  </div>
+</form>
+{% endblock %}

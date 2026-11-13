@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Universal Remote{% endblock %}</title>
+<style>
+  :root { --bg:#f6f6f4; --fg:#1d1d1b; --muted:#6b6b66; --card:#fff; --line:#ddd; --accent:#2b6cb0; --sel:#d8e7f8; --warn:#b7791f; --bad:#c53030; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1b1b1a; --fg:#ececea; --muted:#9a9a94; --card:#262624; --line:#3a3a37; --accent:#63a4e8; --sel:#23405f; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; gap:20px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:2; }
+  header b { margin-right:auto; }
+  a { color:var(--accent); text-decoration:none; }
+  main { padding:16px; max-width:1400px; margin:0 auto; }
+  .msg { padding:8px 12px; background:var(--sel); border-radius:6px; margin-bottom:12px; }
+  .err { padding:8px 12px; border:1px solid var(--bad); color:var(--bad); border-radius:6px; margin-bottom:12px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:10px; }
+  .card { background:var(--card); border:2px solid var(--line); border-radius:8px; overflow:hidden; cursor:pointer; position:relative; }
+  .card img { display:block; width:100%; aspect-ratio:4/3; object-fit:contain; background:#000; }
+  .card .cap { font-size:12px; color:var(--muted); padding:4px 6px; display:flex; justify-content:space-between; }
+  .card input { position:absolute; top:6px; left:6px; width:18px; height:18px; }
+  .card:has(input:checked) { border-color:var(--accent); background:var(--sel); }
+  button, .btn { font:inherit; padding:7px 14px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.danger { border-color:var(--bad); color:var(--bad); }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-start; margin-bottom:14px; padding:12px; background:var(--card); border:1px solid var(--line); border-radius:8px; }
+  .picker { display:flex; flex-direction:column; gap:6px; min-width:320px; flex:1; }
+  .picker input, .picker select { font:inherit; padding:6px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+  table { border-collapse:collapse; width:100%; background:var(--card); }
+  th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .muted { color:var(--muted); }
+  section { margin-bottom:28px; }
+  code { font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <b>Universal Remote</b>
+  <a href="/label">Inbox</a>
+  <a href="/label/entities">Entities &amp; Index</a>
+</header>
+<main>
+  {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+  {% if ha_error %}<div class="err">Home Assistant nicht erreichbar: {{ ha_error }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>
