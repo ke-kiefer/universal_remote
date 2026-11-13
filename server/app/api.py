@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from . import actions as act
 from .ha import HAError
-from .storage import InvalidImage, check_jpeg, is_valid_entity_id
+from .storage import InvalidImage, check_jpeg, is_valid_entity_id, set_rotation
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ async def read_jpeg(request: Request) -> bytes:
         check_jpeg(data)
     except InvalidImage as e:
         raise HTTPException(400, str(e)) from e
-    return data
+    return set_rotation(data, request.app.state.settings.image_rotation)
 
 
 async def entity_payload(request: Request, entity_id: str) -> dict:

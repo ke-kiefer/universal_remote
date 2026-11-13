@@ -39,6 +39,34 @@ def check_jpeg(data: bytes) -> tuple[int, int]:
         raise InvalidImage(f"cannot decode image: {e}") from e
 
 
+# EXIF orientation values that make viewers rotate the image clockwise by N degrees.
+EXIF_ORIENTATION_CW = {90: 6, 180: 3, 270: 8}
+
+
+def set_rotation(data: bytes, degrees: int) -> bytes:
+    """Mark a JPEG to be displayed rotated clockwise by `degrees` (0/90/180/270).
+
+    Lossless: inserts an EXIF orientation tag instead of re-encoding. Pillow
+    (ImageOps.exif_transpose, used for embeddings and thumbnails) and browsers honor it.
+    Images that already carry EXIF data (e.g. phone photos) are left untouched.
+    """
+    if degrees % 360 == 0:
+        return data
+    with Image.open(io.BytesIO(data)) as img:
+        if img.getexif():
+            return data
+    exif = Image.Exif()
+    exif[0x0112] = EXIF_ORIENTATION_CW[degrees % 360]
+    payload = exif.tobytes()
+    if not payload.startswith(b"Exif\x00\x00"):
+        payload = b"Exif\x00\x00" + payload
+    segment = b"\xff\xe1" + (len(payload) + 2).to_bytes(2, "big") + payload
+    pos = 2
+    if data[2:4] == b"\xff\xe0":  # keep the JFIF APP0 segment first
+        pos = 4 + int.from_bytes(data[4:6], "big")
+    return data[:pos] + segment + data[pos:]
+
+
 class Storage:
     def __init__(self, data_dir: Path):
         self.root = Path(data_dir)

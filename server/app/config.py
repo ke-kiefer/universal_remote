@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     data_dir: Path = Path("/data")
     capture_retention_days: int = 7
     max_upload_bytes: int = 2 * 1024 * 1024
+    # Rotate uploaded images clockwise (0/90/180/270), depending on how the camera is mounted.
+    image_rotation: int = 0
 
     # ML
     model_name: str = "dinov2_small"
@@ -48,6 +50,13 @@ class Settings(BaseSettings):
             raise ValueError(f"MODEL_INPUT_SIZE must look like 224x168, got {v!r}") from e
         if w <= 0 or h <= 0 or w % 14 or h % 14:
             raise ValueError(f"MODEL_INPUT_SIZE edges must be positive multiples of 14, got {v!r}")
+        return v
+
+    @field_validator("image_rotation")
+    @classmethod
+    def _check_rotation(cls, v: int) -> int:
+        if v not in (0, 90, 180, 270):
+            raise ValueError("IMAGE_ROTATION must be 0, 90, 180 or 270")
         return v
 
     @field_validator("crop_scales")

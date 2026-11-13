@@ -19,13 +19,18 @@ import time
 import serial
 
 
-def open_port(port: str, baud: int) -> serial.Serial:
+def open_port(port: str, baud: int, quiet: bool = False) -> serial.Serial:
     ser = serial.Serial()
     ser.port = port
     ser.baudrate = baud
     ser.timeout = 0.1
-    # Open with pyserial's default line states (DTR=RTS=asserted). On the
-    # USB-Serial-JTAG this does not reset the chip; only RTS=1 with DTR=0 does.
+    if quiet:
+        # Reconnect after USB re-enumeration: keep both lines released. Opening with the
+        # default states can briefly produce RTS=1/DTR=0 and reset the chip again.
+        ser.dtr = False
+        ser.rts = False
+    # Otherwise pyserial's defaults (DTR=RTS=asserted) are used; the reset pulse in
+    # hard_reset() only works reliably from that state on Windows.
     ser.open()
     return ser
 
@@ -77,7 +82,7 @@ def main() -> int:
         while time.monotonic() < deadline:
             if ser is None:
                 try:
-                    ser = open_port(args.port, args.baud)
+                    ser = open_port(args.port, args.baud, quiet=did_reset or not args.reset)
                 except (serial.SerialException, OSError):
                     time.sleep(0.2)
                     continue

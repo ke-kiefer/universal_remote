@@ -142,3 +142,35 @@ def test_onnx_embedder_real_model():
     assert v.shape == (2, 768)
     assert np.allclose(np.linalg.norm(v, axis=1), 1.0, atol=1e-5)
     assert np.allclose(v, emb.embed_bytes(jpeg(noise=30)), atol=1e-5)
+
+
+# --- rotation ----------------------------------------------------------------------------
+def test_set_rotation_is_lossless_and_honored():
+    import io
+
+    from app.embedder import load_image
+    from app.storage import set_rotation
+
+    img = Image.new("RGB", (80, 60), (0, 0, 0))
+    img.paste((255, 0, 0), (0, 0, 10, 10))  # red marker top-left
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=95)
+    data = buf.getvalue()
+
+    assert set_rotation(data, 0) == data
+    rotated = set_rotation(data, 180)
+    # Lossless: EXIF segment inserted after the 20-byte SOI+APP0 header, the rest untouched.
+    assert rotated[:20] == data[:20] and rotated.endswith(data[20:])
+    assert len(rotated) - len(data) < 100
+    out = np.asarray(load_image(rotated))
+    assert out.shape == (60, 80, 3)
+    assert out[55, 75, 0] > 200 and out[2, 2, 0] < 60  # marker moved to bottom-right
+    assert np.asarray(load_image(set_rotation(data, 90))).shape == (80, 60, 3)
+    # images with existing EXIF are not modified
+    assert set_rotation(rotated, 90) == rotated
+
+
+def test_rotation_config():
+    assert Settings(_env_file=None, image_rotation=180).image_rotation == 180
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, image_rotation=45)
