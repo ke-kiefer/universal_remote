@@ -1,0 +1,26 @@
+# Secrets / local config
+.env
+*.env
+!.env.example
+
+# Runtime data (images, index, model weights)
+data/
+
+# Firmware (ESP-IDF)
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
