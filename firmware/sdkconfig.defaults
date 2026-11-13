@@ -34,3 +34,10 @@ CONFIG_LV_USE_PERF_MONITOR=n
 # Camera driver: frame buffers in PSRAM, OV5640 autofocus (ships the AF firmware)
 CONFIG_CAMERA_CORE0=y
 CONFIG_CAMERA_AF_SUPPORT=y
+
+# LVGL: use the system allocator (PSRAM) and render TTF fonts on the device (umlauts)
+CONFIG_LV_USE_CLIB_MALLOC=y
+CONFIG_LV_USE_CLIB_STRING=y
+CONFIG_LV_USE_TINY_TTF=y
+CONFIG_LV_TINY_TTF_CACHE_GLYPH_CNT=256
+CONFIG_LV_FONT_FMT_TXT_LARGE=y

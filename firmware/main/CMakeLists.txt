@@ -2,15 +2,19 @@ idf_component_register(
     SRCS
         "main.c"
         "board/board.c"
+        "board/battery.c"
         "board/camera.c"
         "net/wifi.c"
         "net/api_client.c"
-    INCLUDE_DIRS "." "board" "net"
+        "ui/ui.c"
+    INCLUDE_DIRS "." "board" "net" "ui"
+    EMBED_FILES "fonts/Montserrat-SemiBold-latin1.ttf"
     REQUIRES
         esp_driver_gpio
         esp_driver_ledc
         esp_driver_spi
         esp_driver_i2c
+        esp_adc
         esp_lcd
         esp_timer
         esp_psram
