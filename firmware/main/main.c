@@ -46,7 +46,7 @@ static void ui_set_busy(bool busy)
 
 static void do_capture(void)
 {
-    char text[128], id[48];
+    char text[160], id[48];
     if (!s_camera_ok) {
         ui_set_text(s_result, "Camera not available");
         return;
@@ -56,6 +56,9 @@ static void do_capture(void)
         return;
     }
     ui_set_busy(true);
+    ui_set_text(s_result, "Focusing...");
+    camera_af_start();
+    camera_af_result_t af = camera_af_wait(APP_AF_TIMEOUT_MS);
     ui_set_text(s_result, "Capturing...");
     int64_t t0 = esp_timer_get_time();
     camera_fb_t *fb = camera_capture();
@@ -68,17 +71,26 @@ static void do_capture(void)
     size_t len = fb->len;
     unsigned w = fb->width, h = fb->height;
     ui_set_text(s_result, "Uploading...");
-    esp_err_t err = api_capture(fb->buf, fb->len, id, sizeof(id));
+    char meta[80];
+    snprintf(meta, sizeof(meta), "af=%s&af_ms=%d&af_raw=%02x&cap_ms=%d&rssi=%d",
+             !af.available ? "na" : af.focused ? "ok" : "timeout", af.ms, af.raw,
+             (int)((t1 - t0) / 1000), wifi_get_rssi());
+    esp_err_t err = api_capture(fb->buf, fb->len, meta, id, sizeof(id));
     int64_t t2 = esp_timer_get_time();
     camera_release(fb);
 
     int cap_ms = (int)((t1 - t0) / 1000), up_ms = (int)((t2 - t1) / 1000);
-    ESP_LOGI(TAG, "TIMING capture=%d ms upload=%d ms size=%u bytes %ux%u result=%s", cap_ms,
-             up_ms, (unsigned)len, w, h, err == ESP_OK ? "ok" : "fail");
+    const char *af_txt = !af.available ? "n/a" : af.focused ? "ok" : "TIMEOUT";
+    ESP_LOGI(TAG,
+             "TIMING af=%d ms (%s, 0x%02x) capture=%d ms upload=%d ms size=%u bytes %ux%u "
+             "result=%s",
+             af.ms, af_txt, af.raw, cap_ms, up_ms, (unsigned)len, w, h,
+             err == ESP_OK ? "ok" : "fail");
     if (err == ESP_OK) {
         s_sent++;
-        snprintf(text, sizeof(text), "Sent #%d (%ux%u, %u KB)\ncapture %d ms, upload %d ms",
-                 s_sent, w, h, (unsigned)(len / 1024), cap_ms, up_ms);
+        snprintf(text, sizeof(text),
+                 "Sent #%d (%ux%u, %u KB)\nAF %s %d ms, capture %d ms\nupload %d ms", s_sent, w,
+                 h, (unsigned)(len / 1024), af_txt, af.ms, cap_ms, up_ms);
     } else {
         snprintf(text, sizeof(text), "Upload failed\n(%u KB, %d ms)", (unsigned)(len / 1024),
                  up_ms);

@@ -132,6 +132,13 @@ esp_err_t wifi_start(void)
     // No modem sleep: with a weak signal power save causes missed beacons and disconnects,
     // and it adds latency. Revisit for battery life later (Phase 4).
     esp_wifi_set_ps(WIFI_PS_NONE);
+    if (APP_WIFI_TX_POWER_DBM > 0) {
+        // Unit: 0.25 dBm. Lower TX power can help boards with a poorly matched antenna.
+        esp_wifi_set_max_tx_power((int8_t)(APP_WIFI_TX_POWER_DBM * 4));
+    }
+    int8_t txp = 0;
+    esp_wifi_get_max_tx_power(&txp);
+    ESP_LOGI(TAG, "max TX power %.2f dBm", txp / 4.0);
     ESP_LOGI(TAG, "scanning for '%s'", APP_WIFI_SSID);
     return ESP_OK;
 }

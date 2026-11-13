@@ -2,6 +2,7 @@
 
 #include "app_env.h"
 #include "board_pins.h"
+#include "esp_camera_af.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -9,7 +10,22 @@
 
 static const char *TAG = "camera";
 
-#define WARMUP_FRAMES 2
+#define WARMUP_FRAMES 3
+#define AF_LOAD_TIMEOUT_MS 3000
+
+// OV5640 AF firmware command interface. Same registers and sequence as esp32-camera's
+// sensors/ov5640_af.c and the Arduino library ESP32_OV5640_AF (OmniVision AF firmware).
+#define AF_CMD_MAIN 0x3022
+#define AF_CMD_ACK 0x3023
+#define AF_FW_STATUS 0x3029
+#define AF_MAIN_RELEASE 0x08     // release focus, back to idle
+#define AF_MAIN_SINGLE 0x03      // trigger single AF
+#define AF_MAIN_CONTINUOUS 0x04  // continuous AF
+#define AF_STATUS_FOCUSED 0x10
+#define AF_STATUS_IDLE 0x70
+
+static bool s_af_ok;
+static int64_t s_af_start_us;
 
 static bool jpeg_complete(const camera_fb_t *fb)
 {
@@ -20,6 +36,29 @@ static bool jpeg_complete(const camera_fb_t *fb)
         if (fb->buf[i - 1] == 0xFF && fb->buf[i] == 0xD9) return true;
     }
     return false;
+}
+
+static int af_read(uint16_t reg)
+{
+    sensor_t *s = esp_camera_sensor_get();
+    return s->get_reg(s, reg, 0xff);
+}
+
+// Send an AF command: ACK=1, MAIN=cmd. The AF firmware clears ACK when the command is done.
+// Does not wait (single AF only clears ACK after focusing, which can take seconds).
+static void af_command(uint8_t cmd)
+{
+    sensor_t *s = esp_camera_sensor_get();
+    s->set_reg(s, AF_CMD_ACK, 0xff, 0x01);
+    s->set_reg(s, AF_CMD_MAIN, 0xff, cmd);
+}
+
+static void af_wait_ack(int timeout_ms)
+{
+    int64_t end = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    while (af_read(AF_CMD_ACK) != 0x00 && esp_timer_get_time() < end) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
 }
 
 esp_err_t camera_init(void)
@@ -66,13 +105,76 @@ esp_err_t camera_init(void)
     s->set_hmirror(s, APP_CAMERA_HMIRROR);
     s->set_vflip(s, APP_CAMERA_VFLIP);
 
-    // Let exposure and white balance settle.
+#ifndef APP_AF_MODE_OFF
+    // Autofocus: esp32-camera ships the OV5640 AF firmware (same blob and register sequence
+    // as the Arduino library ESP32_OV5640_AF by Eric Nam, MIT; originally OmniVision's
+    // reference AF firmware). Loading writes ~4 KB over SCCB to 0x8000, then waits for
+    // FW_STATUS (0x3029) == 0x70 (idle). Triggering is done here directly (non-blocking).
+    if (esp_camera_af_is_supported(s)) {
+        int64_t ta = esp_timer_get_time();
+        const esp_camera_af_config_t af_cfg = {
+            .mode = ESP_CAMERA_AF_MODE_MANUAL,
+            .timeout_ms = AF_LOAD_TIMEOUT_MS,
+        };
+        s_af_ok = esp_camera_af_init(s, &af_cfg) == ESP_OK;
+        ESP_LOGI(TAG, "AF firmware %s in %lld ms (status 0x%02x), mode %s",
+                 s_af_ok ? "loaded" : "FAILED", (esp_timer_get_time() - ta) / 1000,
+                 af_read(AF_FW_STATUS), APP_AF_MODE_NAME);
+#ifdef APP_AF_MODE_CONTINUOUS
+        if (s_af_ok) af_command(AF_MAIN_CONTINUOUS);
+#endif
+    } else {
+        ESP_LOGW(TAG, "AF not supported (CONFIG_CAMERA_AF_SUPPORT off?)");
+    }
+#endif
+
+    // Let exposure and white balance settle; measure the frame rate (drives AF speed).
+    int64_t tf = esp_timer_get_time();
     for (int i = 0; i < WARMUP_FRAMES; i++) {
         camera_fb_t *fb = esp_camera_fb_get();
         if (fb) esp_camera_fb_return(fb);
     }
-    ESP_LOGI(TAG, "ready after %lld ms", (esp_timer_get_time() - t0) / 1000);
+    int frame_ms = (int)((esp_timer_get_time() - tf) / 1000 / WARMUP_FRAMES);
+    ESP_LOGI(TAG, "ready after %lld ms, ~%d ms per frame (~%d fps)",
+             (esp_timer_get_time() - t0) / 1000, frame_ms, frame_ms ? 1000 / frame_ms : 0);
     return ESP_OK;
+}
+
+esp_err_t camera_af_start(void)
+{
+    if (!s_af_ok) return ESP_ERR_NOT_SUPPORTED;
+    s_af_start_us = esp_timer_get_time();
+#ifdef APP_AF_MODE_SINGLE
+    // Release the previous focus first, otherwise FW_STATUS still reads "focused".
+    af_command(AF_MAIN_RELEASE);
+    af_wait_ack(200);
+    af_command(AF_MAIN_SINGLE);
+#endif
+    return ESP_OK;
+}
+
+camera_af_result_t camera_af_wait(int timeout_ms)
+{
+    camera_af_result_t r = {.available = s_af_ok};
+    if (!s_af_ok) return r;
+    int64_t deadline = s_af_start_us + (int64_t)timeout_ms * 1000;
+    int st = -1;
+    while (true) {
+        st = af_read(AF_FW_STATUS);
+        if (st == AF_STATUS_FOCUSED) break;
+        if (esp_timer_get_time() > deadline) break;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    r.focused = st == AF_STATUS_FOCUSED;
+    r.raw = (uint8_t)st;
+    r.ms = (int)((esp_timer_get_time() - s_af_start_us) / 1000);
+    if (r.focused) {
+        ESP_LOGI(TAG, "AF focused in %d ms (%s)", r.ms, APP_AF_MODE_NAME);
+    } else {
+        ESP_LOGW(TAG, "AF not focused after %d ms (status 0x%02x), capturing anyway", r.ms,
+                 r.raw);
+    }
+    return r;
 }
 
 camera_fb_t *camera_capture(void)

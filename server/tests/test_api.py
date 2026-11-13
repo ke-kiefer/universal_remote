@@ -122,3 +122,12 @@ def test_entity_endpoint(client):
     assert body["entity"]["area"] == "Wohnzimmer"
     assert body["state"] == {"state": "open", "current_position": 100}
     assert client.get("/api/entity/light.nope").status_code == 404
+
+
+def test_capture_accepts_diagnostic_params(client, caplog):
+    import logging
+
+    with caplog.at_level(logging.INFO, logger="app.api"):
+        r = upload(client, "/api/capture", jpeg(), device="remote1", af="ok", af_ms="420")
+    assert r.status_code == 201
+    assert "af=ok af_ms=420" in caplog.text

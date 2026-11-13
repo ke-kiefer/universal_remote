@@ -91,10 +91,12 @@ esp_err_t api_health(api_health_t *out)
     return ret;
 }
 
-esp_err_t api_capture(const uint8_t *jpeg, size_t len, char *id_out, size_t id_len)
+esp_err_t api_capture(const uint8_t *jpeg, size_t len, const char *meta, char *id_out,
+                      size_t id_len)
 {
-    char path[64];
-    snprintf(path, sizeof(path), "/api/capture?device=%s", APP_DEVICE_NAME);
+    char path[128];
+    snprintf(path, sizeof(path), "/api/capture?device=%s%s%s", APP_DEVICE_NAME,
+             meta && *meta ? "&" : "", meta ? meta : "");
     char *body = NULL;
     int status = request(path, HTTP_METHOD_POST, "image/jpeg", jpeg, len, TIMEOUT_CAPTURE_MS,
                          &body);

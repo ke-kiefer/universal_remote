@@ -34,6 +34,8 @@ function(app_env_generate env_file out_header)
 
     foreach(line IN LISTS lines)
         string(STRIP "${line}" line)
+        # Drop a UTF-8 BOM or other junk before the key (some editors add a BOM).
+        string(REGEX REPLACE "^[^A-Za-z_#]+" "" line "${line}")
         if(line STREQUAL "" OR line MATCHES "^#")
             continue()
         endif()
@@ -72,10 +74,12 @@ function(app_env_generate env_file out_header)
         "DEVICE_NAME=remote1"
         "CAMERA_FRAMESIZE=SVGA"
         "CAMERA_JPEG_QUALITY=12"
-        "CAMERA_XCLK_MHZ=20"
+        "CAMERA_XCLK_MHZ=10"
         "CAMERA_HMIRROR=1"
         "CAMERA_VFLIP=0"
         "AF_TIMEOUT_MS=1500"
+        "AF_MODE=continuous"
+        "WIFI_TX_POWER_DBM=0"
         "BACKLIGHT_PCT=80")
     foreach(kv IN LISTS defaults)
         string(REGEX MATCH "^([^=]+)=(.*)$" _ "${kv}")
@@ -93,6 +97,12 @@ function(app_env_generate env_file out_header)
             message(FATAL_ERROR "firmware/.env: ${key} must be a number (got '${ENV_${key}}')")
         endif()
     endforeach()
+    if(NOT ENV_AF_MODE MATCHES "^(single|continuous|off)$")
+        message(FATAL_ERROR "firmware/.env: AF_MODE must be single, continuous or off")
+    endif()
+    if(NOT ENV_WIFI_TX_POWER_DBM MATCHES "^[0-9]+(\.[0-9]+)?$")
+        message(FATAL_ERROR "firmware/.env: WIFI_TX_POWER_DBM must be a number like 8.5 (0 = default)")
+    endif()
     if(NOT ENV_DEVICE_NAME MATCHES "^[A-Za-z0-9_-]+$")
         message(FATAL_ERROR "firmware/.env: DEVICE_NAME may only contain A-Z a-z 0-9 _ -")
     endif()
@@ -117,6 +127,10 @@ function(app_env_generate env_file out_header)
     string(APPEND h "#define APP_CAMERA_VFLIP ${ENV_CAMERA_VFLIP}\n")
     string(APPEND h "#define APP_AF_TIMEOUT_MS ${ENV_AF_TIMEOUT_MS}\n")
     string(APPEND h "#define APP_BACKLIGHT_PCT ${ENV_BACKLIGHT_PCT}\n")
+    string(TOUPPER "${ENV_AF_MODE}" AF_MODE_UP)
+    string(APPEND h "#define APP_AF_MODE_${AF_MODE_UP} 1\n")
+    string(APPEND h "#define APP_AF_MODE_NAME \"${ENV_AF_MODE}\"\n")
+    string(APPEND h "#define APP_WIFI_TX_POWER_DBM ((float)(${ENV_WIFI_TX_POWER_DBM}))\n")
 
     # Only touch the header if the content changed (avoids needless rebuilds).
     file(WRITE "${out_header}.tmp" "${h}")

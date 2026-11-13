@@ -70,11 +70,17 @@ async def health(request: Request):
     return {"ok": True, "entities": idx.n_entities, "images": idx.n_images}
 
 
+def device_meta(request: Request) -> str:
+    """Optional diagnostics the remote sends as extra query params (af, af_ms, rssi ...)."""
+    extra = {k: v[:32] for k, v in request.query_params.items() if k != "device"}
+    return " ".join(f"{k}={v}" for k, v in sorted(extra.items())[:10])
+
+
 @router.post("/capture", status_code=201)
 async def capture(request: Request, device: str = Query("remote")):
     data = await read_jpeg(request)
     image_id = request.app.state.storage.save_inbox(data, device)
-    log.info("capture %s (%d bytes)", image_id, len(data))
+    log.info("capture %s (%d bytes) %s", image_id, len(data), device_meta(request))
     return {"id": image_id}
 
 
@@ -126,11 +132,12 @@ async def identify(request: Request, device: str = Query("remote")):
         "total": round((t4 - t0) * 1000),
     }
     log.info(
-        "identify %s -> %s %s (%.0f ms)",
+        "identify %s -> %s %s (%.0f ms) %s",
         capture_id,
         result.status,
         [(c["entity_id"], c["confidence"]) for c in resp["candidates"]],
         (t4 - t0) * 1000,
+        device_meta(request),
     )
     return resp
 

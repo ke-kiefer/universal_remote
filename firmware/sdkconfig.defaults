@@ -31,5 +31,6 @@ CONFIG_LV_USE_LOG=y
 CONFIG_LV_LOG_LEVEL_WARN=y
 CONFIG_LV_USE_PERF_MONITOR=n
 
-# Camera driver: frame buffers in PSRAM
+# Camera driver: frame buffers in PSRAM, OV5640 autofocus (ships the AF firmware)
 CONFIG_CAMERA_CORE0=y
+CONFIG_CAMERA_AF_SUPPORT=y
