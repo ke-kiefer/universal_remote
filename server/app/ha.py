@@ -102,7 +102,10 @@ class HAClient:
 
         self._require_token()
         ws_url = self.url.replace("http://", "ws://").replace("https://", "wss://")
-        async with websockets.connect(f"{ws_url}/api/websocket", open_timeout=5) as ws:
+        # Registries of large installations easily exceed the 1 MB default frame limit.
+        async with websockets.connect(
+            f"{ws_url}/api/websocket", open_timeout=5, max_size=32 * 1024 * 1024
+        ) as ws:
             msg = json.loads(await ws.recv())
             if msg.get("type") != "auth_required":
                 raise HAError(f"unexpected WS greeting {msg.get('type')}")

@@ -2,6 +2,9 @@
 //   status bar (top layer, always visible): WLAN, server, battery
 //   HOME:  big "Erkennen" button, "Training" button, index info
 //   TRAIN: back button, big "Foto" button, counter, last result
+//   BUSY:   spinner + text while identifying
+//   RESULT: name, area/state, confidence, action buttons from the server
+//   CHOOSE: top candidates for uncertain matches
 // Text uses Montserrat via Tiny TTF (umlauts); symbols fall back to LVGL's built-in fonts.
 
 #include "ui.h"
@@ -43,6 +46,10 @@ static lv_obj_t *s_train_btn, *s_train_btn_label, *s_train_back;
 static lv_obj_t *s_train_count, *s_train_detail, *s_train_spinner;
 static lv_obj_t *s_toast;
 static lv_timer_t *s_toast_timer;
+static lv_obj_t *s_busy, *s_busy_label;
+static lv_obj_t *s_result, *s_res_name, *s_res_info, *s_res_conf, *s_res_actions, *s_res_back;
+static lv_obj_t *s_choose, *s_choose_list;
+static char s_res_area[48];
 
 // --- helpers ------------------------------------------------------------------------------
 
@@ -108,7 +115,7 @@ static lv_obj_t *make_screen(void)
 
 static void on_identify(lv_event_t *e)
 {
-    if (s_cb) s_cb(UI_EV_IDENTIFY);
+    if (s_cb) s_cb(UI_EV_IDENTIFY, 0);
 }
 
 static void on_open_train(lv_event_t *e)
@@ -123,7 +130,22 @@ static void on_back(lv_event_t *e)
 
 static void on_photo(lv_event_t *e)
 {
-    if (s_cb) s_cb(UI_EV_TRAIN_PHOTO);
+    if (s_cb) s_cb(UI_EV_TRAIN_PHOTO, 0);
+}
+
+static void on_home(lv_event_t *e)
+{
+    lv_screen_load_anim(s_home, LV_SCREEN_LOAD_ANIM_MOVE_RIGHT, 150, 0, false);
+}
+
+static void on_action(lv_event_t *e)
+{
+    if (s_cb) s_cb(UI_EV_ACTION, (int)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void on_choose(lv_event_t *e)
+{
+    if (s_cb) s_cb(UI_EV_CHOOSE, (int)(intptr_t)lv_event_get_user_data(e));
 }
 
 static void toast_hide(lv_timer_t *t)
@@ -219,6 +241,61 @@ static void build_train(void)
     lv_obj_align(s_train_detail, LV_ALIGN_TOP_MID, 0, 244);
 }
 
+static void build_busy(void)
+{
+    s_busy = make_screen();
+    lv_obj_t *sp = lv_spinner_create(s_busy);
+    lv_obj_set_size(sp, 72, 72);
+    lv_obj_align(sp, LV_ALIGN_TOP_MID, 0, 70);
+    s_busy_label = make_text(s_busy, s_font_m, COLOR_TEXT, "", 224, false);
+    lv_obj_align(s_busy_label, LV_ALIGN_TOP_MID, 0, 170);
+}
+
+static void build_result(void)
+{
+    s_result = make_screen();
+    s_res_back = make_button(s_result, 100, 44, COLOR_SECONDARY, LV_SYMBOL_LEFT " Zurück",
+                             s_font_s, NULL);
+    lv_obj_align(s_res_back, LV_ALIGN_TOP_LEFT, 8, 8);
+    lv_obj_add_event_cb(s_res_back, on_home, LV_EVENT_CLICKED, NULL);
+    s_res_conf = make_text(s_result, s_font_s, COLOR_MUTED, "", 100, true);
+    lv_obj_set_style_text_align(s_res_conf, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(s_res_conf, LV_ALIGN_TOP_RIGHT, -10, 20);
+
+    s_res_name = make_text(s_result, s_font_m, COLOR_TEXT, "", 224, true);
+    lv_obj_align(s_res_name, LV_ALIGN_TOP_MID, 0, 60);
+    s_res_info = make_text(s_result, s_font_s, COLOR_MUTED, "", 224, false);
+    lv_obj_align(s_res_info, LV_ALIGN_TOP_MID, 0, 88);
+
+    // Action buttons are created dynamically (the server decides which actions exist).
+    s_res_actions = lv_obj_create(s_result);
+    lv_obj_remove_style_all(s_res_actions);
+    lv_obj_set_size(s_res_actions, 224, 160);
+    lv_obj_align(s_res_actions, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_set_flex_flow(s_res_actions, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(s_res_actions, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
+                          LV_FLEX_ALIGN_END);
+    lv_obj_set_style_pad_row(s_res_actions, 6, 0);
+    lv_obj_set_style_pad_column(s_res_actions, 6, 0);
+}
+
+static void build_choose(void)
+{
+    s_choose = make_screen();
+    lv_obj_t *title = make_text(s_choose, s_font_m, COLOR_TEXT, "Welches Gerät?", 224, true);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+    s_choose_list = lv_obj_create(s_choose);
+    lv_obj_remove_style_all(s_choose_list);
+    lv_obj_set_size(s_choose_list, 224, 200);
+    lv_obj_align(s_choose_list, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_set_flex_flow(s_choose_list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_choose_list, 6, 0);
+    lv_obj_t *none =
+        make_button(s_choose, 224, 40, COLOR_SECONDARY, "Keins davon", s_font_s, NULL);
+    lv_obj_align(none, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_add_event_cb(none, on_home, LV_EVENT_CLICKED, NULL);
+}
+
 void ui_init(ui_event_cb_t cb)
 {
     s_cb = cb;
@@ -229,6 +306,9 @@ void ui_init(ui_event_cb_t cb)
     build_status_bar();
     build_home();
     build_train();
+    build_busy();
+    build_result();
+    build_choose();
     lv_screen_load(s_home);
     lvgl_port_unlock();
     ESP_LOGI(TAG, "ready");
@@ -313,5 +393,117 @@ void ui_train_done(bool ok, int sent_count, const char *detail)
     lv_label_set_text_fmt(s_train_count, "Gesendet: %d", sent_count);
     lv_label_set_text(s_train_detail, detail);
     lv_obj_set_style_text_color(s_train_detail, lv_color_hex(ok ? COLOR_MUTED : COLOR_ERR), 0);
+    lvgl_port_unlock();
+}
+
+// --- identify flow ------------------------------------------------------------------------
+
+// Must hold the LVGL lock.
+static void load(lv_obj_t *scr)
+{
+    if (lv_screen_active() != scr) {
+        lv_screen_load_anim(scr, LV_SCREEN_LOAD_ANIM_FADE_IN, 120, 0, false);
+    }
+}
+
+void ui_show_home(void)
+{
+    if (!lvgl_port_lock(0)) return;
+    load(s_home);
+    lvgl_port_unlock();
+}
+
+void ui_show_busy(const char *text)
+{
+    if (!lvgl_port_lock(0)) return;
+    lv_label_set_text(s_busy_label, text);
+    load(s_busy);
+    lvgl_port_unlock();
+}
+
+// Must hold the LVGL lock.
+static void render_view(const api_entity_view_t *v)
+{
+    char info[160];
+    if (s_res_area[0] && v->state_text[0]) {
+        snprintf(info, sizeof(info), "%s · %s", s_res_area, v->state_text);
+    } else {
+        snprintf(info, sizeof(info), "%s%s", s_res_area, v->state_text);
+    }
+    lv_label_set_text(s_res_info, info);
+
+    lv_obj_clean(s_res_actions);
+    int n = v->n_actions;
+    if (n == 0) {
+        make_text(s_res_actions, s_font_s, COLOR_MUTED, "Keine Aktionen für dieses Gerät", 224,
+                  false);
+        return;
+    }
+    // <= 3 actions: one per row (full width), otherwise two columns.
+    int cols = n <= 3 ? 1 : 2;
+    int rows = (n + cols - 1) / cols;
+    int w = cols == 1 ? 224 : (224 - 6) / 2;
+    int h = (160 - (rows - 1) * 6) / rows;
+    if (h > 70) h = 70;
+    for (int i = 0; i < n; i++) {
+        lv_obj_t *b =
+            make_button(s_res_actions, w, h, COLOR_ACCENT, v->actions[i].label, s_font_m, NULL);
+        lv_obj_add_event_cb(b, on_action, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    }
+}
+
+void ui_show_result(const api_entity_view_t *v)
+{
+    if (!lvgl_port_lock(0)) return;
+    strlcpy(s_res_area, v->entity.area, sizeof(s_res_area));
+    lv_label_set_text(s_res_name, v->entity.name[0] ? v->entity.name : v->entity.entity_id);
+    if (v->entity.confidence > 0) {
+        lv_label_set_text_fmt(s_res_conf, "%d %%", (int)(v->entity.confidence * 100 + 0.5f));
+    } else {
+        lv_label_set_text(s_res_conf, "");
+    }
+    render_view(v);
+    lv_obj_remove_state(s_res_back, LV_STATE_DISABLED);
+    load(s_result);
+    lvgl_port_unlock();
+}
+
+void ui_update_result(const api_entity_view_t *v)
+{
+    if (!lvgl_port_lock(0)) return;
+    render_view(v);
+    lvgl_port_unlock();
+}
+
+void ui_result_busy(bool busy)
+{
+    if (!lvgl_port_lock(0)) return;
+    uint32_t n = lv_obj_get_child_count(s_res_actions);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *c = lv_obj_get_child(s_res_actions, i);
+        if (busy) lv_obj_add_state(c, LV_STATE_DISABLED);
+        else lv_obj_remove_state(c, LV_STATE_DISABLED);
+    }
+    if (busy) lv_obj_add_state(s_res_back, LV_STATE_DISABLED);
+    else lv_obj_remove_state(s_res_back, LV_STATE_DISABLED);
+    lvgl_port_unlock();
+}
+
+void ui_show_choose(const api_entity_t *cands, int n)
+{
+    if (!lvgl_port_lock(0)) return;
+    lv_obj_clean(s_choose_list);
+    for (int i = 0; i < n; i++) {
+        char text[128];
+        const char *name = cands[i].name[0] ? cands[i].name : cands[i].entity_id;
+        if (cands[i].area[0]) {
+            snprintf(text, sizeof(text), "%s\n%s", name, cands[i].area);
+        } else {
+            snprintf(text, sizeof(text), "%s", name);
+        }
+        lv_obj_t *b = make_button(s_choose_list, 224, 62, COLOR_ACCENT, text, s_font_s, NULL);
+        lv_obj_add_event_cb(b, on_choose, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    }
+    load(s_choose);
     lvgl_port_unlock();
 }

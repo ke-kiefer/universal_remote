@@ -59,6 +59,7 @@ async def entity_payload(request: Request, entity_id: str) -> dict:
             "domain": info.domain,
         },
         "state": act.summarize_state(state),
+        "state_text": act.state_text(entity_id, state),
         "actions": [a.__dict__ for a in act.available_actions(entity_id, state)],
         "_raw_state": state,
     }
@@ -103,6 +104,7 @@ async def identify(request: Request, device: str = Query("remote")):
         "best": None,
         "candidates": [],
         "state": None,
+        "state_text": "",
         "actions": [],
     }
     if result.candidates:
@@ -122,6 +124,7 @@ async def identify(request: Request, device: str = Query("remote")):
         p = await entity_payload(request, best.entity_id)
         resp["best"] = {**p["entity"], "confidence": round(best.score, 3)}
         resp["state"] = p["state"]
+        resp["state_text"] = p["state_text"]
         resp["actions"] = p["actions"]
     t4 = time.perf_counter()
     resp["timing_ms"] = {
@@ -168,7 +171,12 @@ async def action(request: Request, body: ActionRequest):
         raise HTTPException(502, str(e)) from e
     log.info("action %s %s -> %s.%s", body.entity_id, body.action, domain, service)
     p = await entity_payload(request, body.entity_id)
-    return {"ok": True, "state": p["state"], "actions": p["actions"]}
+    return {
+        "ok": True,
+        "state": p["state"],
+        "state_text": p["state_text"],
+        "actions": p["actions"],
+    }
 
 
 class FeedbackRequest(BaseModel):
@@ -197,4 +205,9 @@ async def entity(request: Request, entity_id: str):
     p = await entity_payload(request, entity_id)
     if p["_raw_state"] is None:
         raise HTTPException(404, f"unknown entity {entity_id} (or HA not reachable)")
-    return {"entity": p["entity"], "state": p["state"], "actions": p["actions"]}
+    return {
+        "entity": p["entity"],
+        "state": p["state"],
+        "state_text": p["state_text"],
+        "actions": p["actions"],
+    }

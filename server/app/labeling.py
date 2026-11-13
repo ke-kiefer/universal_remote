@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import logging
 import secrets
@@ -36,11 +37,28 @@ def back(url: str, msg: str | None = None) -> RedirectResponse:
     return RedirectResponse(f"{url}?msg={quote(msg)}" if msg else url, status_code=303)
 
 
-async def ha_entities(request: Request) -> tuple[list, str | None]:
+def filter_entities(entities: list, settings) -> list:
+    """Apply ENTITY_EXCLUDE (globs on id or name) and ENTITY_REQUIRE_AREA."""
+    patterns = settings.exclude_patterns
+    out = []
+    for e in entities:
+        if settings.entity_require_area and not e.area:
+            continue
+        keys = (e.entity_id.lower(), e.name.lower())
+        if any(fnmatch.fnmatchcase(k, p) for p in patterns for k in keys):
+            continue
+        out.append(e)
+    return out
+
+
+async def ha_entities(request: Request, filtered: bool = True) -> tuple[list, str | None]:
+    settings = request.app.state.settings
+    domains = settings.domains & SUPPORTED_DOMAINS
     try:
-        return await request.app.state.ha.entities(SUPPORTED_DOMAINS), None
+        entities = await request.app.state.ha.entities(domains)
     except HAError as e:
         return [], str(e)
+    return (filter_entities(entities, settings) if filtered else entities), None
 
 
 def load_eval(storage) -> dict | None:
@@ -101,7 +119,7 @@ async def reject(request: Request, ids: list[str] = Form(default=[])):
 async def entities_page(request: Request, msg: str | None = None):
     storage = request.app.state.storage
     rec = request.app.state.recognizer
-    entities, ha_error = await ha_entities(request)
+    entities, ha_error = await ha_entities(request, filtered=False)
     names = {e.entity_id: e for e in entities}
     counts = storage.entity_counts()
     rows = [

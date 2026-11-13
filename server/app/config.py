@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     ha_url: str = "http://homeassistant.local:8123"
     ha_token: str = ""
     ha_cache_seconds: int = 300
+    # Which entities the label UI offers (does not affect already labeled images).
+    entity_domains: str = "light,cover,switch,input_boolean,fan,media_player,climate,scene,script"
+    entity_exclude: str = ""  # comma-separated globs on entity_id or name, case-insensitive
+    entity_require_area: bool = False
 
     # Auth: remote sends X-Api-Key; the label UI uses Basic Auth with this as password.
     api_key: str = ""
@@ -80,6 +84,14 @@ class Settings(BaseSettings):
     def input_wh(self) -> tuple[int, int]:
         w, h = (int(x) for x in self.model_input_size.lower().split("x"))
         return w, h
+
+    @property
+    def domains(self) -> set[str]:
+        return {d.strip() for d in self.entity_domains.split(",") if d.strip()}
+
+    @property
+    def exclude_patterns(self) -> list[str]:
+        return [p.strip().lower() for p in self.entity_exclude.split(",") if p.strip()]
 
     @property
     def scales(self) -> list[float]:

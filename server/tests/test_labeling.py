@@ -54,3 +54,27 @@ def test_reindex_and_eval(client):
     assert "6 Bilder" in r.text
     r = client.post("/admin/eval", auth=AUTH)
     assert "Top-1 100" in r.text
+
+
+def test_entity_filter():
+    from app.config import Settings
+    from app.ha import EntityInfo
+    from app.labeling import filter_entities
+
+    ents = [
+        EntityInfo("light.desk", "Schreibtisch", "Büro", "light"),
+        EntityInfo("switch.tv_internet_access", "TV Internetzugang", None, "switch"),
+        EntityInfo("switch.pump", "Pumpe", None, "switch"),
+    ]
+    s = Settings(_env_file=None, entity_exclude="*internetzugang*")
+    assert [e.entity_id for e in filter_entities(ents, s)] == ["light.desk", "switch.pump"]
+    s = Settings(_env_file=None, entity_exclude="switch.*_internet_access")
+    assert [e.entity_id for e in filter_entities(ents, s)] == ["light.desk", "switch.pump"]
+    s = Settings(_env_file=None, entity_require_area=True)
+    assert [e.entity_id for e in filter_entities(ents, s)] == ["light.desk"]
+
+
+def test_inbox_respects_exclude(client, settings):
+    settings.entity_exclude = "light.*"
+    html = client.get("/label", auth=AUTH).text
+    assert "Schreibtisch" not in html and "Rollladen" in html

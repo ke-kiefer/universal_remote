@@ -174,3 +174,15 @@ def test_rotation_config():
     assert Settings(_env_file=None, image_rotation=180).image_rotation == 180
     with pytest.raises(ValueError):
         Settings(_env_file=None, image_rotation=45)
+
+
+def test_state_text():
+    light = {"state": "on", "attributes": {"brightness": 153}}
+    assert act.state_text("light.x", light) == "An · 60 %"
+    assert act.state_text("light.x", {"state": "off", "attributes": {"brightness": None}}) == "Aus"
+    cover = {"state": "open", "attributes": {"current_position": 100}}
+    assert act.state_text("cover.x", cover) == "Offen · Position 100 %"
+    clim = {"state": "heat", "attributes": {"temperature": 21.5, "current_temperature": 20}}
+    assert act.state_text("climate.x", clim) == "Heizen · Soll 21,5 °C · Ist 20 °C"
+    assert act.state_text("scene.x", {"state": "2026-11-13T10:00:00", "attributes": {}}) == ""
+    assert act.state_text("light.x", None) == ""

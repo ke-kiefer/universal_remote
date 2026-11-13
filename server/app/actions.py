@@ -134,3 +134,52 @@ def summarize_state(state: dict | None) -> dict | None:
     if attrs.get("volume_level") is not None:
         out["volume_pct"] = round(attrs["volume_level"] * 100)
     return out
+
+
+STATE_LABELS = {
+    "on": "An",
+    "off": "Aus",
+    "open": "Offen",
+    "closed": "Geschlossen",
+    "opening": "Öffnet",
+    "closing": "Schließt",
+    "playing": "Spielt",
+    "paused": "Pausiert",
+    "idle": "Bereit",
+    "standby": "Standby",
+    "heat": "Heizen",
+    "cool": "Kühlen",
+    "auto": "Automatik",
+    "unavailable": "Nicht verfügbar",
+    "unknown": "Unbekannt",
+}
+
+
+def _num(v: float) -> str:
+    """German number formatting: 21.5 -> '21,5', 20.0 -> '20'."""
+    return f"{v:g}".replace(".", ",")
+
+
+def state_text(entity_id: str, state: dict | None) -> str:
+    """Human-readable German state line for the display (the firmware shows it verbatim)."""
+    s = summarize_state(state)
+    if s is None:
+        return ""
+    domain = entity_id.split(".", 1)[0]
+    raw = s.get("state") or ""
+    parts = []
+    if domain not in ("scene", "script"):  # their state is a timestamp / on-off, not useful
+        parts.append(STATE_LABELS.get(raw, raw))
+    if "brightness_pct" in s and raw == "on":
+        parts.append(f"{s['brightness_pct']} %")
+    if "current_position" in s:
+        parts.append(f"Position {s['current_position']} %")
+    if "percentage" in s and raw == "on":
+        parts.append(f"Stufe {s['percentage']} %")
+    if "temperature" in s:
+        parts.append(f"Soll {_num(float(s['temperature']))} °C")
+    if "current_temperature" in s:
+        parts.append(f"Ist {_num(float(s['current_temperature']))} °C")
+    if "volume_pct" in s:
+        parts.append(f"Lautstärke {s['volume_pct']} %")
+    return " · ".join(p for p in parts if p)

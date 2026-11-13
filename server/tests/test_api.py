@@ -67,6 +67,7 @@ def test_identify_match_with_actions(client):
     assert body["best"]["name"] == "Schreibtisch"
     assert body["best"]["area"] == "Büro"
     assert body["state"] == {"state": "on", "brightness_pct": 60}
+    assert body["state_text"] == "An · 60 %"
     assert [a["id"] for a in body["actions"]] == ["toggle", "brighter", "dimmer"]
     assert [c["entity_id"] for c in body["candidates"]] == ["light.desk", "cover.living"]
 

@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "nvs_flash.h"
+#include <string.h>
 #include "ui.h"
 #include "wifi.h"
 
@@ -24,15 +25,25 @@ static const char *TAG = "main";
 
 #define STATUS_INTERVAL_US (10 * 1000000LL)
 
+typedef struct {
+    ui_event_t type;
+    int arg;
+} app_event_t;
+
 static QueueHandle_t s_events;
 static bool s_camera_ok;
 static bool s_battery_ok;
 static int s_sent;
 
-static void on_ui_event(ui_event_t ev)
+// Last identify result: needed for actions, the choose screen and feedback.
+static api_identify_t s_ident;
+static api_entity_view_t s_view;
+
+static void on_ui_event(ui_event_t ev, int arg)
 {
     // Called in the LVGL task: never block here, just hand over to the app task.
-    xQueueSend(s_events, &ev, 0);
+    app_event_t e = {.type = ev, .arg = arg};
+    xQueueSend(s_events, &e, 0);
 }
 
 static void update_status(void)
@@ -104,20 +115,132 @@ static void train_photo(void)
     }
 }
 
+// Focus (if needed), capture, check JPEG. Returns NULL on failure (toast already shown).
+static camera_fb_t *focus_and_capture(camera_af_result_t *af, int *cap_ms)
+{
+    camera_af_start();
+    *af = camera_af_wait(APP_AF_TIMEOUT_MS);
+    int64_t t0 = esp_timer_get_time();
+    camera_fb_t *fb = camera_capture();
+    *cap_ms = (int)((esp_timer_get_time() - t0) / 1000);
+    return fb;
+}
+
+static void identify(void)
+{
+    if (!s_camera_ok) {
+        ui_toast("Kamera nicht verfügbar", true);
+        return;
+    }
+    if (!wifi_is_connected()) {
+        ui_toast("Kein WLAN – bitte warten", true);
+        return;
+    }
+    int64_t t_start = esp_timer_get_time();
+    ui_show_busy("Fokussiere …");
+    camera_af_result_t af;
+    int cap_ms;
+    camera_fb_t *fb = focus_and_capture(&af, &cap_ms);
+    if (!fb) {
+        ui_show_home();
+        ui_toast("Aufnahme fehlgeschlagen", true);
+        return;
+    }
+    ui_show_busy("Erkenne …");
+    char meta[96];
+    snprintf(meta, sizeof(meta), "af=%s&af_ms=%d&af_raw=%02x&cap_ms=%d&rssi=%d",
+             !af.available ? "na" : af.focused ? "ok" : "timeout", af.ms, af.raw, cap_ms,
+             wifi_get_rssi());
+    int64_t t_up = esp_timer_get_time();
+    size_t len = fb->len;
+    esp_err_t err = api_identify(fb->buf, fb->len, meta, &s_ident);
+    camera_release(fb);
+    int64_t t_end = esp_timer_get_time();
+
+    ESP_LOGI(TAG,
+             "TIMING identify af=%d ms capture=%d ms request=%lld ms (server %d ms) total=%lld "
+             "ms size=%u status=%d",
+             af.ms, cap_ms, (t_end - t_up) / 1000, s_ident.server_ms, (t_end - t_start) / 1000,
+             (unsigned)len, err == ESP_OK ? (int)s_ident.status : -1);
+    if (err != ESP_OK) {
+        ui_show_home();
+        ui_toast("Server nicht erreichbar (WLAN schwach?)", true);
+        return;
+    }
+    switch (s_ident.status) {
+    case API_MATCH:
+        s_view = s_ident.best;
+        ui_show_result(&s_view);
+        break;
+    case API_UNCERTAIN:
+        ui_show_choose(s_ident.candidates, s_ident.n_candidates);
+        break;
+    case API_UNKNOWN:
+        ui_show_home();
+        ui_toast(s_ident.n_candidates ? "Nicht erkannt" : "Nicht erkannt – noch keine Trainingsdaten?",
+                 true);
+        break;
+    }
+}
+
+static void run_action(int idx)
+{
+    if (idx < 0 || idx >= s_view.n_actions) return;
+    const api_action_t *a = &s_view.actions[idx];
+    ESP_LOGI(TAG, "action %s on %s", a->id, s_view.entity.entity_id);
+    ui_result_busy(true);
+    api_entity_view_t upd = s_view;
+    esp_err_t err = api_action(s_view.entity.entity_id, a->id, &upd);
+    if (err == ESP_OK) {
+        // Keep name/area/confidence, take the new state and actions.
+        memcpy(s_view.state_text, upd.state_text, sizeof(s_view.state_text));
+        s_view.n_actions = upd.n_actions;
+        memcpy(s_view.actions, upd.actions, sizeof(s_view.actions));
+        ui_update_result(&s_view);
+    } else {
+        ui_toast("Aktion fehlgeschlagen", true);
+    }
+    ui_result_busy(false);
+}
+
+static void choose(int idx)
+{
+    if (idx < 0 || idx >= s_ident.n_candidates) return;
+    const api_entity_t *c = &s_ident.candidates[idx];
+    ui_show_busy("Lade …");
+    // Feedback first: the confirmed capture becomes a training image (improves the index).
+    if (api_feedback(s_ident.capture_id, c->entity_id) != ESP_OK) {
+        ESP_LOGW(TAG, "feedback for %s failed", c->entity_id);
+    }
+    if (api_entity(c->entity_id, &s_view) != ESP_OK) {
+        ui_show_home();
+        ui_toast("Gerät konnte nicht geladen werden", true);
+        return;
+    }
+    s_view.entity.confidence = c->confidence;
+    ui_show_result(&s_view);
+}
+
 static void app_task(void *arg)
 {
     if (wifi_start() != ESP_OK) ui_toast("WLAN deaktiviert (.env)", true);
     int64_t next_status = 0;
     bool was_connected = false;
     while (true) {
-        ui_event_t ev;
+        app_event_t ev;
         if (xQueueReceive(s_events, &ev, pdMS_TO_TICKS(500)) == pdTRUE) {
-            switch (ev) {
+            switch (ev.type) {
             case UI_EV_TRAIN_PHOTO:
                 train_photo();
                 break;
             case UI_EV_IDENTIFY:
-                ui_toast("Erkennung kommt im nächsten Schritt", false);
+                identify();
+                break;
+            case UI_EV_ACTION:
+                run_action(ev.arg);
+                break;
+            case UI_EV_CHOOSE:
+                choose(ev.arg);
                 break;
             }
         }
@@ -148,7 +271,7 @@ void app_main(void)
     ESP_ERROR_CHECK(board_display_init(&disp));
     board_backlight_set(APP_BACKLIGHT_PCT);
 
-    s_events = xQueueCreate(4, sizeof(ui_event_t));
+    s_events = xQueueCreate(4, sizeof(app_event_t));
     ui_init(on_ui_event);
 
     s_battery_ok = battery_init() == ESP_OK;

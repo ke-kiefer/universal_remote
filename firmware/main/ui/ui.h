@@ -4,12 +4,16 @@
 
 #include <stdbool.h>
 
+#include "api_client.h"
+
 typedef enum {
     UI_EV_IDENTIFY,     // "Erkennen" pressed
     UI_EV_TRAIN_PHOTO,  // "Foto" pressed in training mode
+    UI_EV_ACTION,       // action button on the result screen, arg = action index
+    UI_EV_CHOOSE,       // candidate picked on the choose screen, arg = candidate index
 } ui_event_t;
 
-typedef void (*ui_event_cb_t)(ui_event_t ev);
+typedef void (*ui_event_cb_t)(ui_event_t ev, int arg);
 
 typedef struct {
     bool wifi;
@@ -28,6 +32,21 @@ void ui_set_status(const ui_status_t *st);
 
 // Short message at the bottom of the screen (auto-hides).
 void ui_toast(const char *text, bool error);
+
+void ui_show_home(void);
+
+// Full-screen progress (spinner + text) while identifying.
+void ui_show_busy(const char *text);
+
+// Result screen: name, area, state text, confidence and the server's action buttons.
+void ui_show_result(const api_entity_view_t *view);
+// Refresh state text and actions after an action (stays on the result screen).
+void ui_update_result(const api_entity_view_t *view);
+// Lock/unlock the action buttons while a request is running.
+void ui_result_busy(bool busy);
+
+// Choose screen for uncertain matches: up to API_MAX_CANDIDATES buttons + "Keins davon".
+void ui_show_choose(const api_entity_t *cands, int n);
 
 // Training screen: busy state with progress text, then the result.
 void ui_train_busy(const char *text);
