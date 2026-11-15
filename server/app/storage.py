@@ -30,6 +30,33 @@ class InvalidImage(ValueError):
     pass
 
 
+# Directories that belong to one adapter (labels are that backend's device ids).
+ADAPTER_DIRS = ("inbox", "labeled", "rejected", "captures", "thumbs")
+
+
+def migrate_legacy_layout(data_dir: Path) -> bool:
+    """Move pre-adapter data (flat under DATA_DIR) into DATA_DIR/homeassistant/.
+
+    Before the adapter split all data belonged to Home Assistant. The model weight
+    cache (DATA_DIR/model/weights) stays shared across adapters; the built index
+    moves along with the images it was built from."""
+    data_dir = Path(data_dir)
+    if not any((data_dir / d).is_dir() for d in ADAPTER_DIRS):
+        return False
+    target = data_dir / "homeassistant"
+    target.mkdir(parents=True, exist_ok=True)
+    for d in ADAPTER_DIRS:
+        src = data_dir / d
+        if src.is_dir() and not (target / d).exists():
+            shutil.move(str(src), target / d)
+    (target / "model").mkdir(exist_ok=True)
+    for f in ("index.npz", "index.json", "eval.json"):
+        src = data_dir / "model" / f
+        if src.is_file() and not (target / "model" / f).exists():
+            shutil.move(str(src), target / "model" / f)
+    return True
+
+
 def is_valid_device_id(device_id: str) -> bool:
     return bool(LABEL_RE.match(device_id))
 

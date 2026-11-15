@@ -26,21 +26,21 @@ def test_image_path_traversal_blocked(client):
 def test_reject_and_delete(client, settings):
     ids = [upload(client, "/api/capture", jpeg(seed=i, noise=5)).json()["id"] for i in range(3)]
     client.post("/label/reject", data={"ids": ids[:1]}, auth=AUTH)
-    assert (settings.data_dir / "rejected" / f"{ids[0]}.jpg").exists()
+    assert (settings.data_dir / "homeassistant" / "rejected" / f"{ids[0]}.jpg").exists()
     client.post("/label/assign", data={"entity_id": "light.desk", "ids": ids[1:]}, auth=AUTH)
     assert client.get("/api/health").json()["images"] == 2
     page = client.get("/label/entities", auth=AUTH).text
     assert "light.desk" in page
     client.post("/label/delete", data={"entity_id": "light.desk", "ids": ids[1:]}, auth=AUTH)
     assert client.get("/api/health").json()["images"] == 0
-    assert not (settings.data_dir / "labeled" / "light.desk").exists()
+    assert not (settings.data_dir / "homeassistant" / "labeled" / "light.desk").exists()
 
 
 def test_invalid_entity_id_rejected(client, settings):
     image_id = upload(client, "/api/capture", jpeg()).json()["id"]
     r = client.post("/label/assign", data={"entity_id": "../evil", "ids": [image_id]}, auth=AUTH)
     assert r.status_code == 200  # redirected back with an error message
-    assert (settings.data_dir / "inbox" / f"{image_id}.jpg").exists()
+    assert (settings.data_dir / "homeassistant" / "inbox" / f"{image_id}.jpg").exists()
 
 
 def test_reindex_and_eval(client):

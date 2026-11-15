@@ -236,6 +236,24 @@ def test_media_player_actions():
         resolve_service("media_player.tv", "vol_up", full)
 
 
+def test_migrate_legacy_layout(tmp_path):
+    from app.storage import migrate_legacy_layout
+
+    # pre-adapter layout: data flat under DATA_DIR, index next to the weight cache
+    (tmp_path / "labeled" / "light.a").mkdir(parents=True)
+    (tmp_path / "labeled" / "light.a" / "img.jpg").write_bytes(b"x")
+    (tmp_path / "inbox").mkdir()
+    (tmp_path / "model" / "weights").mkdir(parents=True)
+    (tmp_path / "model" / "index.npz").write_bytes(b"i")
+    assert migrate_legacy_layout(tmp_path) is True
+    assert (tmp_path / "homeassistant" / "labeled" / "light.a" / "img.jpg").exists()
+    assert (tmp_path / "homeassistant" / "model" / "index.npz").exists()
+    assert not (tmp_path / "labeled").exists() and not (tmp_path / "inbox").exists()
+    # the shared weight cache stays in place; a second run is a no-op
+    assert (tmp_path / "model" / "weights").is_dir()
+    assert migrate_legacy_layout(tmp_path) is False
+
+
 # --- adapters ----------------------------------------------------------------------------
 def test_demo_adapter_roundtrip():
     import asyncio

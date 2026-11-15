@@ -62,6 +62,12 @@ def test_label_and_identify_with_native_id(demo_client):
     assert body["best"]["domain"] == "light"
 
 
+def test_demo_data_is_separate(demo_client, settings):
+    image_id = upload(demo_client, "/api/capture", jpeg(GREEN)).json()["id"]
+    assert (settings.data_dir / "demo" / "inbox" / f"{image_id}.jpg").exists()
+    assert not (settings.data_dir / "homeassistant").exists()
+
+
 def test_label_ui_lists_demo_devices(demo_client):
     html = demo_client.get("/label", auth=AUTH).text
     assert "DemoDeckenlampe" in html and "Wohnzimmer" in html

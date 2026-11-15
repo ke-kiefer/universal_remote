@@ -33,7 +33,7 @@ def test_capture_stores_in_inbox(client, settings):
     assert r.status_code == 201
     image_id = r.json()["id"]
     assert "_remote1_" in image_id
-    assert (settings.data_dir / "inbox" / f"{image_id}.jpg").exists()
+    assert (settings.data_dir / "homeassistant" / "inbox" / f"{image_id}.jpg").exists()
 
 
 def test_rejects_bad_images(client):
@@ -82,7 +82,9 @@ def test_feedback_adds_training_image(client, settings):
     cap = upload(client, "/api/identify", jpeg(GREEN)).json()["capture_id"]
     r = client.post("/api/feedback", json={"capture_id": cap, "entity_id": "switch.fan"})
     assert r.status_code == 200 and r.json()["added"] is True
-    assert (settings.data_dir / "labeled" / "switch.fan" / f"{cap}_fb.jpg").exists()
+    assert (
+        settings.data_dir / "homeassistant" / "labeled" / "switch.fan" / f"{cap}_fb.jpg"
+    ).exists()
     assert client.get("/api/health").json()["entities"] == 3
     body = upload(client, "/api/identify", jpeg(GREEN, noise=4)).json()
     assert body["best"]["entity_id"] == "switch.fan"
@@ -195,5 +197,5 @@ def test_feedback_none_goes_to_inbox(client, settings):
     cap = upload(client, "/api/identify", jpeg(GREEN)).json()["capture_id"]
     r = client.post("/api/feedback", json={"capture_id": cap, "entity_id": None, "source": "none"})
     assert r.json()["inbox"] == cap
-    assert (settings.data_dir / "inbox" / f"{cap}.jpg").exists()
+    assert (settings.data_dir / "homeassistant" / "inbox" / f"{cap}.jpg").exists()
     assert client.get("/api/health").json()["images"] == 0

@@ -175,7 +175,7 @@ def print_report(r: dict) -> None:
 def main() -> None:
     from .embedder import OnnxEmbedder, ensure_model
     from .recognizer import Recognizer
-    from .storage import Storage
+    from .storage import Storage, migrate_legacy_layout
 
     ap = argparse.ArgumentParser(description="Leave-one-out evaluation")
     ap.add_argument("--input-size", help="override MODEL_INPUT_SIZE, e.g. 448x336")
@@ -198,8 +198,9 @@ def main() -> None:
     }
     base = Settings()
     settings = Settings(**{**base.model_dump(), **{k: v for k, v in overrides.items() if v}})
-    storage = Storage(settings.data_dir)
-    model_path = ensure_model(settings.model_name, storage.model / "weights")
+    migrate_legacy_layout(settings.data_dir)
+    storage = Storage(settings.data_dir / settings.adapter)
+    model_path = ensure_model(settings.model_name, settings.data_dir / "model" / "weights")
     emb = OnnxEmbedder(
         settings.model_name, model_path, settings.input_wh, settings.scales, settings.pooling
     )

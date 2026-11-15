@@ -13,7 +13,7 @@ from .adapters import Adapter, create_adapter
 from .config import Settings, get_settings
 from .embedder import Embedder, OnnxEmbedder, ensure_model
 from .recognizer import Recognizer
-from .storage import Storage
+from .storage import Storage, migrate_legacy_layout
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("app")
@@ -29,17 +29,21 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         s = settings or get_settings()
-        storage = Storage(s.data_dir)
+        backend = adapter or create_adapter(s)
+        if migrate_legacy_layout(s.data_dir):
+            log.info("moved pre-adapter data into %s", s.data_dir / "homeassistant")
+        # Images, labels and the index belong to the adapter whose device ids they use;
+        # only the model weight cache is shared.
+        storage = Storage(s.data_dir / backend.name)
         removed = storage.cleanup_captures(s.capture_retention_days)
         if removed:
             log.info("removed %d old captures", removed)
         emb = embedder
         if emb is None:
-            model_path = ensure_model(s.model_name, storage.model / "weights")
+            model_path = ensure_model(s.model_name, s.data_dir / "model" / "weights")
             emb = OnnxEmbedder(s.model_name, model_path, s.input_wh, s.scales, s.pooling)
         rec = Recognizer(s, storage, emb)
         rec.load_or_build()
-        backend = adapter or create_adapter(s)
         app.state.settings = s
         app.state.storage = storage
         app.state.recognizer = rec
