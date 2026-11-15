@@ -33,7 +33,8 @@
 #define BOARD_TOUCH_PIN_SDA     GPIO_NUM_48         // EXAMPLE_PIN_NUM_I2C_SDA
 #define BOARD_TOUCH_PIN_SCL     GPIO_NUM_47         // EXAMPLE_PIN_NUM_I2C_SCL
 #define BOARD_TOUCH_PIN_INT     GPIO_NUM_NC         // demo: -1; schematic: TP_INT = GPIO46 (unused)
-#define BOARD_IMU_PIN_INT1      GPIO_NUM_3          // schematic: IMU_INT1 = IO3 (RTC GPIO)
+#define BOARD_TOUCH_PIN_INT_WAKE GPIO_NUM_46        // schematic: TP_INT = IO46, only used as light sleep wake-up
+#define BOARD_IMU_PIN_INT1      GPIO_NUM_3          // schematic: IMU_INT1 = IO3, but no signal arrives (see imu.h)
 #define BOARD_PIN_BOOT_KEY      GPIO_NUM_0          // schematic: BOOT key (RTC GPIO)
 #define BOARD_TOUCH_PIN_RST     GPIO_NUM_NC         // demo: rst_gpio_num = -1
 

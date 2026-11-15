@@ -5,6 +5,7 @@ idf_component_register(
         "board/board.c"
         "board/battery.c"
         "board/camera.c"
+        "board/imu.c"
         "net/wifi.c"
         "net/api_client.c"
         "ui/ui.c"
@@ -20,6 +21,7 @@ idf_component_register(
         esp_timer
         esp_psram
         esp_pm
+        esp_driver_usb_serial_jtag
         esp_wifi
         esp_netif
         esp_event

@@ -12,6 +12,7 @@ typedef enum {
     UI_EV_ACTION,       // action button on the result screen, arg = action index
     UI_EV_CHOOSE,       // choose screen: arg = candidate index, -1 = "Keins davon"
     UI_EV_WAKE,         // touch while the wake guard was shown (dimmed/idle)
+    UI_EV_POWER,        // power button: arg 1 = long press (switch off), 0 = short tap
 } ui_event_t;
 
 typedef void (*ui_event_cb_t)(ui_event_t ev, int arg);

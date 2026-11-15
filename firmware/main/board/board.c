@@ -15,13 +15,19 @@
 #include "esp_lcd_touch_cst816s.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "board";
 
 #define LCD_DRAW_LINES 40  // LVGL draw buffer height in lines
 
+static i2c_master_bus_handle_t s_i2c_bus;
+static esp_lcd_panel_handle_t s_panel;
+
 static void backlight_init(void)
 {
+    gpio_hold_dis(BOARD_LCD_PIN_BL);  // held low during deep sleep
     const ledc_timer_config_t timer = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .duty_resolution = LEDC_TIMER_10_BIT,
@@ -100,6 +106,7 @@ static esp_err_t touch_init(esp_lcd_touch_handle_t *out_tp)
         .flags.enable_internal_pullup = true,
     };
     ESP_RETURN_ON_ERROR(i2c_new_master_bus(&bus_cfg, &bus), TAG, "i2c bus");
+    s_i2c_bus = bus;
 
     esp_lcd_panel_io_handle_t io = NULL;
     esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
@@ -123,6 +130,7 @@ esp_err_t board_display_init(lv_display_t **out_disp)
     esp_lcd_panel_io_handle_t io = NULL;
     esp_lcd_panel_handle_t panel = NULL;
     ESP_RETURN_ON_ERROR(lcd_init(&io, &panel), TAG, "lcd");
+    s_panel = panel;
 
     esp_lcd_touch_handle_t tp = NULL;
     esp_err_t touch_err = touch_init(&tp);
@@ -158,4 +166,29 @@ esp_err_t board_display_init(lv_display_t **out_disp)
              tp ? "ok" : "MISSING");
     *out_disp = disp;
     return ESP_OK;
+}
+
+i2c_master_bus_handle_t board_i2c_bus(void)
+{
+    return s_i2c_bus;
+}
+
+void board_display_power(bool on)
+{
+    if (!s_panel) return;
+    if (on) {
+        esp_lcd_panel_disp_sleep(s_panel, false);  // ST7789 needs ~120 ms after sleep out
+        vTaskDelay(pdMS_TO_TICKS(120));
+    } else {
+        board_backlight_set(0);
+        esp_lcd_panel_disp_sleep(s_panel, true);
+    }
+}
+
+void board_display_sleep(void)
+{
+    board_backlight_set(0);
+    ledc_stop(LEDC_LOW_SPEED_MODE, BOARD_BL_LEDC_CHANNEL, 0);
+    gpio_hold_en(BOARD_LCD_PIN_BL);  // RTC GPIO: stays low in deep sleep (no glowing)
+    if (s_panel) esp_lcd_panel_disp_sleep(s_panel, true);
 }

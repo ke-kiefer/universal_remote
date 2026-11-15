@@ -114,6 +114,16 @@ static lv_obj_t *make_screen(void)
 
 // --- events (LVGL task) -------------------------------------------------------------------
 
+static void on_power(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_LONG_PRESSED) {
+        if (s_cb) s_cb(UI_EV_POWER, 1);
+    } else if (code == LV_EVENT_SHORT_CLICKED) {
+        if (s_cb) s_cb(UI_EV_POWER, 0);
+    }
+}
+
 static void on_identify(lv_event_t *e)
 {
     if (s_cb) s_cb(UI_EV_IDENTIFY, 0);
@@ -215,10 +225,15 @@ static void build_home(void)
     lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 36);
     lv_obj_add_event_cb(b, on_identify, LV_EVENT_CLICKED, NULL);
 
-    b = make_button(s_home, 216, 64, COLOR_SECONDARY, LV_SYMBOL_IMAGE "  Training", s_font_m,
+    b = make_button(s_home, 148, 64, COLOR_SECONDARY, LV_SYMBOL_IMAGE "  Training", s_font_m,
                     NULL);
-    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 198);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 12, 198);
     lv_obj_add_event_cb(b, on_open_train, LV_EVENT_CLICKED, NULL);
+
+    // Power off needs a long press (no accidental switch-off in the pocket).
+    b = make_button(s_home, 60, 64, COLOR_SECONDARY, LV_SYMBOL_POWER, s_font_m, NULL);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -12, 198);
+    lv_obj_add_event_cb(b, on_power, LV_EVENT_ALL, NULL);
 
     s_home_info = make_text(s_home, s_font_s, COLOR_MUTED, "", 224, true);
     lv_obj_align(s_home_info, LV_ALIGN_BOTTOM_MID, 0, -6);

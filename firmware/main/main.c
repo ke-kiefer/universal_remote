@@ -49,6 +49,17 @@ static void on_ui_event(ui_event_t ev, int arg)
     xQueueSend(s_events, &e, 0);
 }
 
+// Show a short message, then deep sleep that only the BOOT key ends.
+static void switch_off(const char *text, const char *reason)
+{
+    char msg[96];
+    snprintf(msg, sizeof(msg), "%s\nEinschalten: BOOT-Taste", text);
+    power_wake();  // backlight on so the message is readable
+    ui_show_busy(msg);
+    vTaskDelay(pdMS_TO_TICKS(2500));
+    power_off(reason);
+}
+
 static void update_status(void)
 {
     ui_status_t st = {.wifi = wifi_is_connected(), .battery_v = -1.0f};
@@ -67,6 +78,7 @@ static void update_status(void)
         st.battery_pct = battery_percent(st.battery_v);
     }
     ui_set_status(&st);
+    if (power_check_battery(st.battery_v)) switch_off("Akku leer", "battery low");
 }
 
 static void train_photo(void)
@@ -244,7 +256,6 @@ static void choose(int idx)
 
 static void app_task(void *arg)
 {
-    if (wifi_start() != ESP_OK) ui_toast("WLAN deaktiviert (.env)", true);
     int64_t next_status = 0;
     bool was_connected = false;
     while (true) {
@@ -265,6 +276,13 @@ static void app_task(void *arg)
                 break;
             case UI_EV_WAKE:
                 power_wake();
+                break;
+            case UI_EV_POWER:
+                if (ev.arg) {
+                    switch_off("Ausgeschaltet", "power button");
+                } else {
+                    ui_toast("Zum Ausschalten gedrückt halten", false);
+                }
                 break;
             }
             // Requests can take seconds: count inactivity from when they are done.
@@ -303,11 +321,13 @@ void app_main(void)
     s_events = xQueueCreate(4, sizeof(app_event_t));
     ui_init(on_ui_event);
 
+    power_init();
     s_battery_ok = battery_init() == ESP_OK;
+    // WLAN connects in the background while the camera loads its AF firmware (~4 s).
+    if (wifi_start() != ESP_OK) ui_toast("WLAN deaktiviert (.env)", true);
     s_camera_ok = camera_init() == ESP_OK;
     if (!s_camera_ok) ui_toast("Kamera-Init fehlgeschlagen", true);
 
-    power_init();
     xTaskCreate(app_task, "app", 8192, NULL, 4, NULL);
     ESP_LOGI(TAG, "ready");
 }

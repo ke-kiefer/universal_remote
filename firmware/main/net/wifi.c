@@ -25,6 +25,7 @@ static esp_netif_t *s_netif;
 static int64_t s_start_us;
 static wifi_config_t s_cfg;
 static esp_timer_handle_t s_retry_timer;
+static volatile bool s_suspended;
 
 static void start_scan(void)
 {
@@ -79,6 +80,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *d = data;
         xEventGroupClearBits(s_events, BIT_CONNECTED);
+        if (s_suspended) return;  // wifi_suspend(): no reconnect
         ESP_LOGW(TAG, "disconnected (reason %d, rssi %d), rescanning", d->reason, d->rssi);
         // Do not block the event task; rescan after a short pause.
         esp_timer_start_once(s_retry_timer, 500 * 1000);
@@ -91,6 +93,17 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
                  IP2STR(&e->ip_info.ip), wifi_get_rssi(),
                  (esp_timer_get_time() - s_start_us) / 1000);
         xEventGroupSetBits(s_events, BIT_CONNECTED);
+    }
+}
+
+static void apply_radio_settings(void)
+{
+    // No modem sleep while active: with a weak signal power save causes missed beacons and
+    // disconnects, and it adds latency (modem sleep only while idle, see power.c).
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    if (APP_WIFI_TX_POWER_DBM > 0) {
+        // Unit: 0.25 dBm. Lower TX power can help boards with a poorly matched antenna.
+        esp_wifi_set_max_tx_power((int8_t)(APP_WIFI_TX_POWER_DBM * 4));
     }
 }
 
@@ -129,13 +142,7 @@ esp_err_t wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &s_cfg));
     s_start_us = esp_timer_get_time();
     ESP_ERROR_CHECK(esp_wifi_start());
-    // No modem sleep: with a weak signal power save causes missed beacons and disconnects,
-    // and it adds latency. Revisit for battery life later (Phase 4).
-    esp_wifi_set_ps(WIFI_PS_NONE);
-    if (APP_WIFI_TX_POWER_DBM > 0) {
-        // Unit: 0.25 dBm. Lower TX power can help boards with a poorly matched antenna.
-        esp_wifi_set_max_tx_power((int8_t)(APP_WIFI_TX_POWER_DBM * 4));
-    }
+    apply_radio_settings();
     int8_t txp = 0;
     esp_wifi_get_max_tx_power(&txp);
     ESP_LOGI(TAG, "max TX power %.2f dBm", txp / 4.0);
@@ -177,4 +184,25 @@ void wifi_set_power_save(bool on)
 {
     esp_err_t err = esp_wifi_set_ps(on ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
     ESP_LOGI(TAG, "modem sleep %s (%s)", on ? "on" : "off", esp_err_to_name(err));
+}
+
+void wifi_suspend(void)
+{
+    if (!s_events || s_suspended) return;
+    s_suspended = true;
+    esp_timer_stop(s_retry_timer);
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    xEventGroupClearBits(s_events, BIT_CONNECTED);
+    ESP_LOGI(TAG, "stopped");
+}
+
+void wifi_resume(void)
+{
+    if (!s_events || !s_suspended) return;
+    s_suspended = false;
+    s_start_us = esp_timer_get_time();
+    esp_wifi_start();  // STA_START -> scan -> connect
+    apply_radio_settings();
+    ESP_LOGI(TAG, "restarted, scanning");
 }

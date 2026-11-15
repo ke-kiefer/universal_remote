@@ -72,6 +72,7 @@ static void af_wait_ack(int timeout_ms)
 
 esp_err_t camera_init(void)
 {
+    gpio_hold_dis(BOARD_CAM_PIN_PWDN);  // held high (powered down) during deep sleep
     const camera_config_t cfg = {
         .pin_pwdn = BOARD_CAM_PIN_PWDN,
         .pin_reset = BOARD_CAM_PIN_RESET,
@@ -159,6 +160,14 @@ void camera_sleep(void)
     ledc_timer_pause(LEDC_LOW_SPEED_MODE, BOARD_CAM_LEDC_TIMER);
     s_sleeping = true;
     ESP_LOGI(TAG, "standby");
+}
+
+void camera_power_off(void)
+{
+    camera_sleep();
+    // Hardware power down via PWDN, held through deep sleep (RTC GPIO).
+    gpio_set_level(BOARD_CAM_PIN_PWDN, 1);
+    gpio_hold_en(BOARD_CAM_PIN_PWDN);
 }
 
 void camera_wake(void)

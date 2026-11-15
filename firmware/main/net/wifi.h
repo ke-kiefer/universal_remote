@@ -21,3 +21,7 @@ int wifi_get_rssi(void);
 
 // Modem sleep on/off (off by default: weak signal, latency). Used while the device is idle.
 void wifi_set_power_save(bool on);
+
+// Radio off (light sleep) and back on (scan + reconnect in the background).
+void wifi_suspend(void);
+void wifi_resume(void);

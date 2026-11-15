@@ -13,6 +13,9 @@ esp_err_t camera_init(void);
 void camera_sleep(void);
 void camera_wake(void);
 
+// Before deep sleep: standby plus PWDN pin held high. camera_init() releases it.
+void camera_power_off(void);
+
 // Autofocus (OV5640 AF firmware, loaded in camera_init).
 typedef struct {
     bool available;  // AF firmware loaded
