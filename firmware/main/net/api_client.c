@@ -13,7 +13,7 @@
 
 static const char *TAG = "api";
 
-// Timeouts from CLAUDE.md: identify/capture 8 s (upload), action 3 s.
+// Timeouts per the API contract (README): identify/capture 8 s (upload), action 3 s.
 #define TIMEOUT_HEALTH_MS 3000
 #define TIMEOUT_UPLOAD_MS 8000
 #define TIMEOUT_ACTION_MS 3000

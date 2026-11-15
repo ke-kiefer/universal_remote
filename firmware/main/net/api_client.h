@@ -1,4 +1,4 @@
-// HTTP client for the recognition server (see API contract in CLAUDE.md).
+// HTTP client for the recognition server (see the API contract in the README).
 // Never call from the LVGL task. The firmware only displays what the server sends:
 // names, state text and action labels come ready-made from the server.
 #pragma once
