@@ -10,9 +10,9 @@ from fastapi.testclient import TestClient
 from httpx import Response
 from PIL import Image
 
+from app.adapters.homeassistant import HAClient, HomeAssistantAdapter
 from app.config import Settings
 from app.embedder import l2_normalize, load_image
-from app.ha import HAClient
 from app.main import create_app
 
 HA_URL = "http://ha.test:8123"
@@ -99,7 +99,17 @@ def client(settings, ha_mock, monkeypatch):
         return {"light.desk": "Büro", "cover.living": "Wohnzimmer"}
 
     monkeypatch.setattr(HAClient, "_fetch_areas", fake_areas)
-    app = create_app(settings, embedder=FakeEmbedder(), ha=HAClient(HA_URL, "t"))
+    app = create_app(settings, embedder=FakeEmbedder(), adapter=HomeAssistantAdapter(HA_URL, "t"))
+    with TestClient(app) as c:
+        c.headers["X-Api-Key"] = API_KEY
+        yield c
+
+
+@pytest.fixture
+def demo_client(settings):
+    from app.adapters.demo import DemoAdapter
+
+    app = create_app(settings, embedder=FakeEmbedder(), adapter=DemoAdapter())
     with TestClient(app) as c:
         c.headers["X-Api-Key"] = API_KEY
         yield c

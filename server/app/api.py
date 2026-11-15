@@ -12,8 +12,8 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from . import actions as act
-from .ha import HAError
-from .storage import InvalidImage, check_jpeg, is_valid_entity_id, set_rotation
+from .adapters.base import AdapterError, DeviceState
+from .storage import InvalidImage, check_jpeg, is_valid_device_id, set_rotation
 
 log = logging.getLogger(__name__)
 
@@ -43,27 +43,33 @@ async def read_jpeg(request: Request) -> bytes:
     return set_rotation(data, request.app.state.settings.image_rotation)
 
 
-async def entity_payload(request: Request, entity_id: str, state: dict | None = None) -> dict:
-    """Name, area, compact state and available actions of an entity.
+_FETCH = object()  # sentinel: fetch the state from the backend
 
-    `state` = already known fresh state, otherwise it is fetched from HA."""
-    ha = request.app.state.ha
-    if state is None:
+
+async def entity_payload(
+    request: Request, device_id: str, state: DeviceState | None | object = _FETCH
+) -> dict:
+    """Name, area, compact state and available actions of a device.
+
+    `state` = already known fresh state (may be None), otherwise it is fetched."""
+    adapter = request.app.state.adapter
+    if state is _FETCH:
+        state = None
         try:
-            state = await ha.state(entity_id)
-        except HAError as e:
-            log.warning("HA state for %s failed: %s", entity_id, e)
-    info = await ha.entity_info(entity_id, state)
+            state = await adapter.get_state(device_id)
+        except AdapterError as e:
+            log.warning("state for %s failed: %s", device_id, e)
+    device = await adapter.device(device_id)
     return {
         "entity": {
-            "entity_id": entity_id,
-            "name": info.name,
-            "area": info.area,
-            "domain": info.domain,
+            "entity_id": device.device_id,
+            "name": device.name,
+            "area": device.area,
+            "domain": device.category,
         },
         "state": act.summarize_state(state),
-        "state_text": act.state_text(entity_id, state),
-        "actions": [a.__dict__ for a in act.available_actions(entity_id, state)],
+        "state_text": act.state_text(device.category, state),
+        "actions": [a.__dict__ for a in adapter.actions(device, state)],
         "_raw_state": state,
     }
 
@@ -112,15 +118,15 @@ async def identify(request: Request, device: str = Query("remote")):
     }
     if result.candidates:
         top = result.candidates[:3]
-        infos = [await request.app.state.ha.entity_info(c.entity_id) for c in top]
+        devices = [await request.app.state.adapter.device(c.entity_id) for c in top]
         resp["candidates"] = [
             {
                 "entity_id": c.entity_id,
-                "name": i.name,
-                "area": i.area,
+                "name": d.name,
+                "area": d.area,
                 "confidence": round(c.score, 3),
             }
-            for c, i in zip(top, infos, strict=True)
+            for c, d in zip(top, devices, strict=True)
         ]
     if result.status != "unknown":
         best = result.candidates[0]
@@ -134,7 +140,7 @@ async def identify(request: Request, device: str = Query("remote")):
         "store": round((t1 - t0) * 1000),
         "embed": round((t2 - t1) * 1000),
         "query": round((t3 - t2) * 1000),
-        "ha": round((t4 - t3) * 1000),
+        "backend": round((t4 - t3) * 1000),
         "total": round((t4 - t0) * 1000),
     }
     log.info(
@@ -148,36 +154,32 @@ async def identify(request: Request, device: str = Query("remote")):
     return resp
 
 
-def state_changed(before: dict, after: dict | None) -> bool:
+def state_changed(before: DeviceState, after: DeviceState | None) -> bool:
     if not after:
         return False
-    if after.get("last_updated") and after.get("last_updated") != before.get("last_updated"):
+    if after.changed_token and after.changed_token != before.changed_token:
         return True
-    return (after.get("state"), after.get("attributes")) != (
-        before.get("state"),
-        before.get("attributes"),
-    )
+    return (after.state, after.attributes) != (before.state, before.attributes)
 
 
 async def state_after_action(
-    ha, entity_id: str, before: dict, changed: list, timeout_ms: int
-) -> tuple[dict | None, int]:
-    """New state after a service call, plus how long we waited for it (ms).
+    adapter, device_id: str, before: DeviceState, performed: DeviceState | None, timeout_ms: int
+) -> tuple[DeviceState | None, int]:
+    """New state after an action, plus how long we waited for it (ms).
 
-    HA's service response lists the states changed during the call, but many devices
-    (Zigbee, Hue, WiFi) confirm asynchronously afterwards. Then poll until the state
-    changes or the timeout passes (e.g. "brighter" at 100 % changes nothing)."""
+    `performed` = state the backend reported with the action call, if any. Many devices
+    (Zigbee, Hue, WiFi) confirm asynchronously afterwards instead; then poll until the
+    state changes or the timeout passes (e.g. "brighter" at 100 % changes nothing)."""
     t0 = time.perf_counter()
-    for s in changed if isinstance(changed, list) else []:
-        if isinstance(s, dict) and s.get("entity_id") == entity_id and state_changed(before, s):
-            return s, 0
+    if performed is not None and state_changed(before, performed):
+        return performed, 0
     deadline = t0 + timeout_ms / 1000
     state = None
     while True:
         try:
-            state = await ha.state(entity_id)
-        except HAError as e:
-            log.warning("HA state for %s failed: %s", entity_id, e)
+            state = await adapter.get_state(device_id)
+        except AdapterError as e:
+            log.warning("state for %s failed: %s", device_id, e)
         if state_changed(before, state) or time.perf_counter() >= deadline:
             return state, round((time.perf_counter() - t0) * 1000)
         await asyncio.sleep(0.15)
@@ -190,31 +192,27 @@ class ActionRequest(BaseModel):
 
 @router.post("/action")
 async def action(request: Request, body: ActionRequest):
-    if not is_valid_entity_id(body.entity_id):
+    if not is_valid_device_id(body.entity_id):
         raise HTTPException(400, "invalid entity_id")
-    ha = request.app.state.ha
+    adapter = request.app.state.adapter
     try:
-        state = await ha.state(body.entity_id)
-    except HAError as e:
+        state = await adapter.get_state(body.entity_id)
+    except AdapterError as e:
         raise HTTPException(502, str(e)) from e
     if state is None:
         raise HTTPException(404, f"unknown entity {body.entity_id}")
     try:
-        domain, service, data = act.resolve(body.entity_id, body.action, state)
+        performed = await adapter.perform(body.entity_id, body.action, state)
     except act.UnsupportedAction as e:
         raise HTTPException(400, str(e)) from e
-    try:
-        changed = await ha.call_service(domain, service, data)
-    except HAError as e:
+    except AdapterError as e:
         raise HTTPException(502, str(e)) from e
     timeout = request.app.state.settings.action_state_timeout_ms
-    new_state, waited = await state_after_action(ha, body.entity_id, state, changed, timeout)
+    new_state, waited = await state_after_action(adapter, body.entity_id, state, performed, timeout)
     log.info(
-        "action %s %s -> %s.%s, state %s after %d ms",
+        "action %s %s, state %s after %d ms",
         body.entity_id,
         body.action,
-        domain,
-        service,
         "updated" if state_changed(state, new_state) else "unchanged",
         waited,
     )
@@ -252,7 +250,7 @@ async def feedback(request: Request, body: FeedbackRequest):
         log.info("feedback %s (%s) -> inbox", body.capture_id, body.source)
         return {"ok": True, "added": False, "inbox": image_id}
 
-    if not is_valid_entity_id(body.entity_id):
+    if not is_valid_device_id(body.entity_id):
         raise HTTPException(400, "invalid entity_id")
     if storage.feedback_path(body.capture_id, body.entity_id).exists():
         return {"ok": True, "added": False, "reason": "exists"}
@@ -271,11 +269,11 @@ async def feedback(request: Request, body: FeedbackRequest):
 
 @router.get("/entity/{entity_id}")
 async def entity(request: Request, entity_id: str):
-    if not is_valid_entity_id(entity_id):
+    if not is_valid_device_id(entity_id):
         raise HTTPException(400, "invalid entity_id")
     p = await entity_payload(request, entity_id)
     if p["_raw_state"] is None:
-        raise HTTPException(404, f"unknown entity {entity_id} (or HA not reachable)")
+        raise HTTPException(404, f"unknown entity {entity_id} (or backend not reachable)")
     return {
         "entity": p["entity"],
         "state": p["state"],

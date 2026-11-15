@@ -12,7 +12,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # Home Assistant
+    # Smart-home backend: "homeassistant" or "demo" (in-memory fake devices, no config)
+    adapter: str = "homeassistant"
+
+    # Home Assistant (only used with ADAPTER=homeassistant)
     ha_url: str = "http://homeassistant.local:8123"
     ha_token: str = ""
     ha_cache_seconds: int = 300
@@ -50,6 +53,13 @@ class Settings(BaseSettings):
     # Server
     host: str = "0.0.0.0"
     port: int = 8010
+
+    @field_validator("adapter")
+    @classmethod
+    def _check_adapter(cls, v: str) -> str:
+        if v not in ("homeassistant", "demo"):
+            raise ValueError("ADAPTER must be 'homeassistant' or 'demo'")
+        return v
 
     @field_validator("model_input_size")
     @classmethod

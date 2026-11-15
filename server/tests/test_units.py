@@ -5,6 +5,9 @@ import pytest
 from PIL import Image
 
 from app import actions as act
+from app.adapters.base import Device
+from app.adapters.demo import DemoAdapter
+from app.adapters.homeassistant import HomeAssistantAdapter, normalize_state, resolve_service
 from app.config import Settings
 from app.embedder import center_crop, fit_letterbox, make_views, target_size
 from app.index import Candidate, Thresholds, VectorIndex, classify
@@ -64,9 +67,13 @@ def test_storage_path_safety(tmp_path):
     with pytest.raises(ValueError):
         s.resolve_rel("../outside.jpg")
     with pytest.raises(ValueError):
-        s.label_inbox(["a"], "not an entity")
+        s.label_inbox(["a"], "not a device id")
     with pytest.raises(ValueError):
         s.label_inbox(["../../x"], "light.a")
+    with pytest.raises(ValueError):
+        s.label_inbox(["a"], "..")
+    # native ids of other backends (e.g. openHAB item names) are valid labels
+    assert s.label_inbox([], "WohnzimmerLampe") == []
 
 
 # --- index -------------------------------------------------------------------------------
@@ -104,32 +111,44 @@ def test_classify():
     assert classify([Candidate("a", 0.7)], th) == "uncertain"
 
 
-# --- actions -----------------------------------------------------------------------------
+# --- HA adapter: actions + service mapping -----------------------------------------------
+HA = HomeAssistantAdapter("http://ha.invalid:8123", "t")
+
+
+def ha_actions(entity_id: str, raw: dict | None) -> list[str]:
+    category = entity_id.split(".", 1)[0]
+    device = Device(entity_id, entity_id, None, category)
+    state = normalize_state({"entity_id": entity_id, **raw}) if raw is not None else None
+    return [a.id for a in HA.actions(device, state)]
+
+
 def test_light_actions_depend_on_color_modes():
     onoff = {"attributes": {"supported_color_modes": ["onoff"]}}
     dim = {"attributes": {"supported_color_modes": ["color_temp"]}}
-    assert [a.id for a in act.available_actions("light.x", onoff)] == ["toggle"]
-    assert [a.id for a in act.available_actions("light.x", dim)] == ["toggle", "brighter", "dimmer"]
+    assert ha_actions("light.x", onoff) == ["toggle"]
+    assert ha_actions("light.x", dim) == ["toggle", "brighter", "dimmer"]
 
 
 def test_cover_without_stop():
     state = {"attributes": {"supported_features": 1 | 2}}
-    assert [a.id for a in act.available_actions("cover.x", state)] == ["open", "close"]
-    with pytest.raises(act.UnsupportedAction):
-        act.resolve("cover.x", "stop", state)
+    assert ha_actions("cover.x", state) == ["open", "close"]
+    assert "stop" not in ha_actions("cover.x", state)
 
 
 def test_climate_resolve():
-    state = {"attributes": {"supported_features": 1, "temperature": 21.0}}
-    assert act.resolve("climate.x", "warmer", state) == (
+    raw = {"attributes": {"supported_features": 1, "temperature": 21.0}}
+    assert resolve_service("climate.x", "warmer", raw) == (
         "climate",
         "set_temperature",
         {"entity_id": "climate.x", "temperature": 21.5},
     )
+    with pytest.raises(act.UnsupportedAction):
+        resolve_service("climate.x", "warmer", {"attributes": {}})
 
 
 def test_fallback_without_state():
-    assert [a.id for a in act.available_actions("cover.x", None)] == ["open", "stop", "close"]
+    assert ha_actions("cover.x", None) == ["open", "stop", "close"]
+    assert act.default_actions("unknown_category") == []
 
 
 # --- real model (skipped if not downloaded) ----------------------------------------------
@@ -176,42 +195,84 @@ def test_rotation_config():
         Settings(_env_file=None, image_rotation=45)
 
 
+def _ha_text(entity_id: str, raw: dict | None) -> str:
+    category = entity_id.split(".", 1)[0]
+    state = normalize_state(raw) if raw is not None else None
+    return act.state_text(category, state)
+
+
 def test_state_text():
     light = {"state": "on", "attributes": {"brightness": 153}}
-    assert act.state_text("light.x", light) == "An · 60 %"
-    assert act.state_text("light.x", {"state": "off", "attributes": {"brightness": None}}) == "Aus"
+    assert _ha_text("light.x", light) == "An · 60 %"
+    assert _ha_text("light.x", {"state": "off", "attributes": {"brightness": None}}) == "Aus"
     cover = {"state": "open", "attributes": {"current_position": 100}}
-    assert act.state_text("cover.x", cover) == "Offen · Position 100 %"
+    assert _ha_text("cover.x", cover) == "Offen · Position 100 %"
     clim = {"state": "heat", "attributes": {"temperature": 21.5, "current_temperature": 20}}
-    assert act.state_text("climate.x", clim) == "Heizen · Soll 21,5 °C · Ist 20 °C"
-    assert act.state_text("scene.x", {"state": "2026-11-13T10:00:00", "attributes": {}}) == ""
-    assert act.state_text("light.x", None) == ""
+    assert _ha_text("climate.x", clim) == "Heizen · Soll 21,5 °C · Ist 20 °C"
+    assert _ha_text("scene.x", {"state": "2026-11-13T10:00:00", "attributes": {}}) == ""
+    assert act.state_text("light", None) == ""
 
 
 def test_button_press():
     state = {"state": "2026-11-15T08:00:00+00:00", "attributes": {"friendly_name": "Haustür"}}
-    assert [a.label for a in act.available_actions("button.haustuer_oeffnen", state)] == [
-        "Auslösen"
-    ]
-    assert act.resolve("button.haustuer_oeffnen", "press", state) == (
+    assert ha_actions("button.haustuer_oeffnen", state) == ["press"]
+    assert resolve_service("button.haustuer_oeffnen", "press", state) == (
         "button",
         "press",
         {"entity_id": "button.haustuer_oeffnen"},
     )
-    assert act.state_text("button.haustuer_oeffnen", state) == ""
-    assert act.resolve("input_button.x", "press", None)[:2] == ("input_button", "press")
+    assert _ha_text("button.haustuer_oeffnen", state) == ""
+    assert resolve_service("input_button.x", "press", None)[:2] == ("input_button", "press")
 
 
 def test_media_player_actions():
     feats = 1 | 4 | 128 | 256 | 1024 | 16384  # pause, volume, on, off, volume step, play
     full = {"state": "playing", "attributes": {"supported_features": feats}}
-    ids = [a.id for a in act.available_actions("media_player.tv", full)]
-    assert ids == ["toggle", "play_pause"]
-    assert act.resolve("media_player.tv", "toggle", full)[:2] == ("media_player", "toggle")
+    assert ha_actions("media_player.tv", full) == ["toggle", "play_pause"]
+    assert resolve_service("media_player.tv", "toggle", full)[:2] == ("media_player", "toggle")
     no_power = {"state": "playing", "attributes": {"supported_features": 1 | 16384}}
-    assert [a.id for a in act.available_actions("media_player.x", no_power)] == ["play_pause"]
+    assert ha_actions("media_player.x", no_power) == ["play_pause"]
     with pytest.raises(act.UnsupportedAction):
-        act.resolve("media_player.tv", "vol_up", full)
+        resolve_service("media_player.tv", "vol_up", full)
+
+
+# --- adapters ----------------------------------------------------------------------------
+def test_demo_adapter_roundtrip():
+    import asyncio
+
+    async def run():
+        demo = DemoAdapter()
+        devices = await demo.devices()
+        assert {d.category for d in devices} == {"light", "cover", "switch", "scene"}
+        lamp = await demo.device("DemoDeckenlampe")
+        state = await demo.get_state("DemoDeckenlampe")
+        assert [a.id for a in demo.actions(lamp, state)] == ["toggle", "brighter", "dimmer"]
+        # capability override: the reading lamp is not dimmable
+        reading = await demo.device("DemoLeselampe")
+        assert [a.id for a in demo.actions(reading, None)] == ["toggle"]
+        new = await demo.perform("DemoDeckenlampe", "brighter", state)
+        assert new.attributes["brightness_pct"] == 80
+        assert new.changed_token != state.changed_token
+        with pytest.raises(act.UnsupportedAction):
+            await demo.perform("DemoLeselampe", "brighter", None)
+        assert await demo.get_state("nope") is None
+
+    asyncio.run(run())
+
+
+def test_adapter_config():
+    assert Settings(_env_file=None, adapter="demo").adapter == "demo"
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, adapter="openhab")
+
+
+def test_demo_state_is_wire_ready():
+    import asyncio
+
+    demo = DemoAdapter()
+    state = asyncio.run(demo.get_state("DemoRollladen"))
+    assert act.summarize_state(state) == {"state": "open", "current_position": 100}
+    assert act.state_text("cover", state) == "Offen · Position 100 %"
 
 
 def test_index_without_files():

@@ -44,7 +44,7 @@
 </header>
 <main>
   {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
-  {% if ha_error %}<div class="err">Home Assistant nicht erreichbar: {{ ha_error }}</div>{% endif %}
+  {% if backend_error %}<div class="err">Smart-Home-System nicht erreichbar: {{ backend_error }}</div>{% endif %}
   {% block content %}{% endblock %}
 </main>
 </body>

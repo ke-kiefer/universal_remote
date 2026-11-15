@@ -1,8 +1,17 @@
-"""Domain -> actions mapping. The firmware renders these generically as buttons."""
+"""Canonical category/action catalog and German state texts (backend-independent).
+
+Adapters map native device types onto these categories, may filter the per-device
+action list and execute the actions. The firmware renders actions generically as
+buttons (id + label).
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .adapters.base import DeviceState
 
 
 @dataclass(frozen=True)
@@ -11,136 +20,63 @@ class Action:
     label: str
 
 
-# HA supported_features bit flags (see homeassistant.components.*.const)
-COVER_OPEN, COVER_CLOSE, COVER_STOP = 1, 2, 8
-FAN_SET_SPEED = 1
-MP_PAUSE, MP_TURN_ON, MP_TURN_OFF, MP_PLAY = 1, 128, 256, 16384
-CLIMATE_TARGET_TEMPERATURE = 1
-
-SUPPORTED_DOMAINS = {
-    "light",
-    "cover",
-    "switch",
-    "input_boolean",
-    "fan",
-    "media_player",
-    "climate",
-    "scene",
-    "script",
-    "button",
-    "input_button",
-}
-
-# Domains whose HA state is only a timestamp of the last activation (not shown).
-STATELESS_DOMAINS = {"scene", "script", "button", "input_button"}
-
-DIMMABLE_COLOR_MODES = {"brightness", "color_temp", "hs", "xy", "rgb", "rgbw", "rgbww", "white"}
-
-
 class UnsupportedAction(ValueError):
     pass
 
 
-def available_actions(entity_id: str, state: dict | None) -> list[Action]:
-    """Actions for an entity. Without state (HA down) fall back to the domain defaults."""
-    domain = entity_id.split(".", 1)[0]
-    attrs = (state or {}).get("attributes", {})
-    known = state is not None
-    feats = attrs.get("supported_features", 0) or 0
+# Category -> canonical actions with German labels. Adapters narrow this per device
+# (e.g. no dimming for on/off-only lights) and may override labels.
+CATEGORIES: dict[str, tuple[Action, ...]] = {
+    "light": (
+        Action("toggle", "Ein/Aus"),
+        Action("brighter", "Heller"),
+        Action("dimmer", "Dunkler"),
+    ),
+    "cover": (Action("open", "Hoch"), Action("stop", "Stopp"), Action("close", "Runter")),
+    "switch": (Action("toggle", "Ein/Aus"),),
+    "input_boolean": (Action("toggle", "Ein/Aus"),),
+    "fan": (
+        Action("toggle", "Ein/Aus"),
+        Action("faster", "Schneller"),
+        Action("slower", "Langsamer"),
+    ),
+    "media_player": (Action("toggle", "Ein/Aus"), Action("play_pause", "Play/Pause")),
+    "climate": (Action("warmer", "Wärmer"), Action("colder", "Kälter")),
+    "scene": (Action("activate", "Aktivieren"),),
+    "script": (Action("activate", "Aktivieren"),),
+    "button": (Action("press", "Auslösen"),),
+    "input_button": (Action("press", "Auslösen"),),
+}
 
-    def has(flag: int) -> bool:
-        return not known or bool(feats & flag)
+SUPPORTED_CATEGORIES = set(CATEGORIES)
 
-    if domain == "light":
-        acts = [Action("toggle", "Ein/Aus")]
-        modes = set(attrs.get("supported_color_modes") or [])
-        if not known or modes & DIMMABLE_COLOR_MODES:
-            acts += [Action("brighter", "Heller"), Action("dimmer", "Dunkler")]
-        return acts
-    if domain == "cover":
-        acts = []
-        if has(COVER_OPEN):
-            acts.append(Action("open", "Hoch"))
-        if has(COVER_STOP):
-            acts.append(Action("stop", "Stopp"))
-        if has(COVER_CLOSE):
-            acts.append(Action("close", "Runter"))
-        return acts
-    if domain in ("switch", "input_boolean"):
-        return [Action("toggle", "Ein/Aus")]
-    if domain == "fan":
-        acts = [Action("toggle", "Ein/Aus")]
-        if has(FAN_SET_SPEED):
-            acts += [Action("faster", "Schneller"), Action("slower", "Langsamer")]
-        return acts
-    if domain == "media_player":
-        acts = []
-        if has(MP_TURN_ON) or has(MP_TURN_OFF):
-            acts.append(Action("toggle", "Ein/Aus"))
-        if has(MP_PLAY) or has(MP_PAUSE):
-            acts.append(Action("play_pause", "Play/Pause"))
-        return acts
-    if domain == "climate":
-        if has(CLIMATE_TARGET_TEMPERATURE):
-            return [Action("warmer", "Wärmer"), Action("colder", "Kälter")]
-        return []
-    if domain in ("scene", "script"):
-        return [Action("activate", "Aktivieren")]
-    if domain in ("button", "input_button"):
-        return [Action("press", "Auslösen")]
-    return []
+# Categories whose backend state is only a timestamp of the last activation (not shown).
+STATELESS_CATEGORIES = {"scene", "script", "button", "input_button"}
 
 
-def resolve(entity_id: str, action: str, state: dict | None) -> tuple[str, str, dict]:
-    """Map (entity, action id) to an HA service call: (domain, service, data)."""
-    domain = entity_id.split(".", 1)[0]
-    if action not in {a.id for a in available_actions(entity_id, state)}:
-        raise UnsupportedAction(f"action {action!r} not available for {entity_id}")
-    data: dict = {"entity_id": entity_id}
-    simple = {
-        ("light", "toggle"): "toggle",
-        ("switch", "toggle"): "toggle",
-        ("input_boolean", "toggle"): "toggle",
-        ("fan", "toggle"): "toggle",
-        ("cover", "open"): "open_cover",
-        ("cover", "stop"): "stop_cover",
-        ("cover", "close"): "close_cover",
-        ("fan", "faster"): "increase_speed",
-        ("fan", "slower"): "decrease_speed",
-        ("media_player", "toggle"): "toggle",
-        ("media_player", "play_pause"): "media_play_pause",
-        ("scene", "activate"): "turn_on",
-        ("script", "activate"): "turn_on",
-        ("button", "press"): "press",
-        ("input_button", "press"): "press",
-    }
-    if (domain, action) in simple:
-        return domain, simple[(domain, action)], data
-    if domain == "light" and action in ("brighter", "dimmer"):
-        data["brightness_step_pct"] = 20 if action == "brighter" else -20
-        return "light", "turn_on", data
-    if domain == "climate" and action in ("warmer", "colder"):
-        current = (state or {}).get("attributes", {}).get("temperature")
-        if current is None:
-            raise UnsupportedAction(f"{entity_id} has no target temperature")
-        data["temperature"] = float(current) + (0.5 if action == "warmer" else -0.5)
-        return "climate", "set_temperature", data
-    raise UnsupportedAction(f"action {action!r} not available for {entity_id}")
+def default_actions(category: str) -> list[Action]:
+    return list(CATEGORIES.get(category, ()))
 
 
-def summarize_state(state: dict | None) -> dict | None:
-    """Compact state for the small display."""
+# Normalized attribute keys in display order (part of the API contract with the firmware).
+ATTRIBUTE_ORDER = (
+    "brightness_pct",
+    "current_position",
+    "percentage",
+    "temperature",
+    "current_temperature",
+    "volume_pct",
+)
+
+
+def summarize_state(state: DeviceState | None) -> dict | None:
+    """Compact state for the small display (wire format of the `state` field)."""
     if state is None:
         return None
-    attrs = state.get("attributes", {})
-    out: dict = {"state": state.get("state")}
-    if attrs.get("brightness") is not None:
-        out["brightness_pct"] = round(attrs["brightness"] / 255 * 100)
-    for key in ("current_position", "percentage", "temperature", "current_temperature"):
-        if attrs.get(key) is not None:
-            out[key] = attrs[key]
-    if attrs.get("volume_level") is not None:
-        out["volume_pct"] = round(attrs["volume_level"] * 100)
+    out: dict = {"state": state.state}
+    for key in ATTRIBUTE_ORDER:
+        if state.attributes.get(key) is not None:
+            out[key] = state.attributes[key]
     return out
 
 
@@ -168,15 +104,14 @@ def _num(v: float) -> str:
     return f"{v:g}".replace(".", ",")
 
 
-def state_text(entity_id: str, state: dict | None) -> str:
+def state_text(category: str, state: DeviceState | None) -> str:
     """Human-readable German state line for the display (the firmware shows it verbatim)."""
     s = summarize_state(state)
     if s is None:
         return ""
-    domain = entity_id.split(".", 1)[0]
     raw = s.get("state") or ""
     parts = []
-    if domain not in STATELESS_DOMAINS:
+    if category not in STATELESS_CATEGORIES:
         parts.append(STATE_LABELS.get(raw, raw))
     if "brightness_pct" in s and raw == "on":
         parts.append(f"{s['brightness_pct']} %")

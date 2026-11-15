@@ -12,7 +12,9 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-ENTITY_RE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
+# Training label = native device id of the active adapter (HA: "light.desk",
+# openHAB: "WohnzimmerLampe", ...). Must be safe as a directory name.
+LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 DEVICE_RE = re.compile(r"[^A-Za-z0-9_-]")
 IMAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 THUMB_SIZE = (240, 180)
@@ -28,8 +30,8 @@ class InvalidImage(ValueError):
     pass
 
 
-def is_valid_entity_id(entity_id: str) -> bool:
-    return bool(ENTITY_RE.match(entity_id))
+def is_valid_device_id(device_id: str) -> bool:
+    return bool(LABEL_RE.match(device_id))
 
 
 def check_jpeg(data: bytes) -> tuple[int, int]:
@@ -115,8 +117,8 @@ class Storage:
 
     def label_inbox(self, image_ids: list[str], entity_id: str) -> list[Path]:
         """Move inbox images to labeled/<entity_id>/. Returns the new paths."""
-        if not is_valid_entity_id(entity_id):
-            raise ValueError(f"invalid entity id {entity_id!r}")
+        if not is_valid_device_id(entity_id):
+            raise ValueError(f"invalid device id {entity_id!r}")
         dest = self.labeled / entity_id
         dest.mkdir(parents=True, exist_ok=True)
         moved = []
@@ -130,8 +132,8 @@ class Storage:
 
     def feedback_path(self, capture_id: str, entity_id: str) -> Path:
         """Where a confirmed capture is stored as training image (marked with _fb)."""
-        if not is_valid_entity_id(entity_id):
-            raise ValueError(f"invalid entity id {entity_id!r}")
+        if not is_valid_device_id(entity_id):
+            raise ValueError(f"invalid device id {entity_id!r}")
         name = f"{self._check_id(capture_id)}{FEEDBACK_SUFFIX}.jpg"
         return self.labeled / entity_id / name
 
@@ -162,8 +164,8 @@ class Storage:
         return n
 
     def delete_labeled(self, entity_id: str, image_ids: list[str]) -> list[Path]:
-        if not is_valid_entity_id(entity_id):
-            raise ValueError(f"invalid entity id {entity_id!r}")
+        if not is_valid_device_id(entity_id):
+            raise ValueError(f"invalid device id {entity_id!r}")
         deleted = []
         for image_id in image_ids:
             p = self.labeled / entity_id / f"{self._check_id(image_id)}.jpg"
@@ -192,7 +194,7 @@ class Storage:
         """All labeled images as (entity_id, path), sorted for reproducibility."""
         out = []
         for d in sorted(self.labeled.iterdir()):
-            if d.is_dir() and is_valid_entity_id(d.name):
+            if d.is_dir() and is_valid_device_id(d.name):
                 out.extend((d.name, p) for p in sorted(d.glob("*.jpg")))
         return out
 

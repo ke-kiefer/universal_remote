@@ -14,8 +14,8 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
-from .actions import SUPPORTED_DOMAINS
-from .ha import HAError
+from .actions import SUPPORTED_CATEGORIES
+from .adapters.base import AdapterError
 from .storage import is_feedback_image
 
 log = logging.getLogger(__name__)
@@ -38,28 +38,29 @@ def back(url: str, msg: str | None = None) -> RedirectResponse:
     return RedirectResponse(f"{url}?msg={quote(msg)}" if msg else url, status_code=303)
 
 
-def filter_entities(entities: list, settings) -> list:
+def filter_devices(devices: list, settings) -> list:
     """Apply ENTITY_EXCLUDE (globs on id or name) and ENTITY_REQUIRE_AREA."""
     patterns = settings.exclude_patterns
     out = []
-    for e in entities:
-        if settings.entity_require_area and not e.area:
+    for d in devices:
+        if settings.entity_require_area and not d.area:
             continue
-        keys = (e.entity_id.lower(), e.name.lower())
+        keys = (d.device_id.lower(), d.name.lower())
         if any(fnmatch.fnmatchcase(k, p) for p in patterns for k in keys):
             continue
-        out.append(e)
+        out.append(d)
     return out
 
 
-async def ha_entities(request: Request, filtered: bool = True) -> tuple[list, str | None]:
+async def adapter_devices(request: Request, filtered: bool = True) -> tuple[list, str | None]:
     settings = request.app.state.settings
-    domains = settings.domains & SUPPORTED_DOMAINS
+    categories = settings.domains & SUPPORTED_CATEGORIES
     try:
-        entities = await request.app.state.ha.entities(domains)
-    except HAError as e:
+        devices = await request.app.state.adapter.devices()
+    except AdapterError as e:
         return [], str(e)
-    return (filter_entities(entities, settings) if filtered else entities), None
+    devices = [d for d in devices if d.category in categories]
+    return (filter_devices(devices, settings) if filtered else devices), None
 
 
 def load_eval(storage) -> dict | None:
@@ -70,15 +71,15 @@ def load_eval(storage) -> dict | None:
 @router.get("/label")
 async def inbox(request: Request, msg: str | None = None):
     storage = request.app.state.storage
-    entities, ha_error = await ha_entities(request)
+    devices, backend_error = await adapter_devices(request)
     return templates.TemplateResponse(
         request,
         "inbox.html",
         {
             "ids": storage.inbox_ids(),
-            "entities": entities,
+            "entities": devices,
             "counts": storage.entity_counts(),
-            "ha_error": ha_error,
+            "backend_error": backend_error,
             "msg": msg,
         },
     )
@@ -120,8 +121,8 @@ async def reject(request: Request, ids: list[str] = Form(default=[])):
 async def entities_page(request: Request, msg: str | None = None):
     storage = request.app.state.storage
     rec = request.app.state.recognizer
-    entities, ha_error = await ha_entities(request, filtered=False)
-    names = {e.entity_id: e for e in entities}
+    devices, backend_error = await adapter_devices(request, filtered=False)
+    names = {d.device_id: d for d in devices}
     counts = storage.entity_counts()
     fb_counts = storage.feedback_counts()
     rows = [
@@ -131,7 +132,7 @@ async def entities_page(request: Request, msg: str | None = None):
             "area": names[eid].area if eid in names else "",
             "count": n,
             "feedback": fb_counts.get(eid, 0),
-            "missing": bool(entities) and eid not in names,
+            "missing": bool(devices) and eid not in names,
         }
         for eid, n in sorted(counts.items())
     ]
@@ -144,7 +145,7 @@ async def entities_page(request: Request, msg: str | None = None):
             "config": rec.embedder.config_key,
             "settings": request.app.state.settings,
             "eval": load_eval(storage),
-            "ha_error": ha_error,
+            "backend_error": backend_error,
             "msg": msg,
         },
     )

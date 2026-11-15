@@ -56,22 +56,22 @@ def test_reindex_and_eval(client):
     assert "Top-1 100" in r.text
 
 
-def test_entity_filter():
+def test_device_filter():
+    from app.adapters.base import Device
     from app.config import Settings
-    from app.ha import EntityInfo
-    from app.labeling import filter_entities
+    from app.labeling import filter_devices
 
-    ents = [
-        EntityInfo("light.desk", "Schreibtisch", "Büro", "light"),
-        EntityInfo("switch.tv_internet_access", "TV Internetzugang", None, "switch"),
-        EntityInfo("switch.pump", "Pumpe", None, "switch"),
+    devs = [
+        Device("light.desk", "Schreibtisch", "Büro", "light"),
+        Device("switch.tv_internet_access", "TV Internetzugang", None, "switch"),
+        Device("switch.pump", "Pumpe", None, "switch"),
     ]
     s = Settings(_env_file=None, entity_exclude="*internetzugang*")
-    assert [e.entity_id for e in filter_entities(ents, s)] == ["light.desk", "switch.pump"]
+    assert [d.device_id for d in filter_devices(devs, s)] == ["light.desk", "switch.pump"]
     s = Settings(_env_file=None, entity_exclude="switch.*_internet_access")
-    assert [e.entity_id for e in filter_entities(ents, s)] == ["light.desk", "switch.pump"]
+    assert [d.device_id for d in filter_devices(devs, s)] == ["light.desk", "switch.pump"]
     s = Settings(_env_file=None, entity_require_area=True)
-    assert [e.entity_id for e in filter_entities(ents, s)] == ["light.desk"]
+    assert [d.device_id for d in filter_devices(devs, s)] == ["light.desk"]
 
 
 def test_inbox_respects_exclude(client, settings):

@@ -9,9 +9,9 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
 from . import api, labeling
+from .adapters import Adapter, create_adapter
 from .config import Settings, get_settings
 from .embedder import Embedder, OnnxEmbedder, ensure_model
-from .ha import HAClient
 from .recognizer import Recognizer
 from .storage import Storage
 
@@ -22,9 +22,9 @@ log = logging.getLogger("app")
 def create_app(
     settings: Settings | None = None,
     embedder: Embedder | None = None,
-    ha: HAClient | None = None,
+    adapter: Adapter | None = None,
 ) -> FastAPI:
-    """App factory. Tests inject a fake embedder and a mocked HA client."""
+    """App factory. Tests inject a fake embedder and a mocked adapter."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -39,20 +39,21 @@ def create_app(
             emb = OnnxEmbedder(s.model_name, model_path, s.input_wh, s.scales, s.pooling)
         rec = Recognizer(s, storage, emb)
         rec.load_or_build()
-        client = ha or HAClient(s.ha_url, s.ha_token, s.ha_cache_seconds)
+        backend = adapter or create_adapter(s)
         app.state.settings = s
         app.state.storage = storage
         app.state.recognizer = rec
-        app.state.ha = client
+        app.state.adapter = backend
         log.info(
-            "ready: model=%s input=%s scales=%s pooling=%s",
+            "ready: adapter=%s model=%s input=%s scales=%s pooling=%s",
+            backend.name,
             s.model_name,
             s.model_input_size,
             s.scales,
             s.pooling,
         )
         yield
-        await client.close()
+        await backend.close()
 
     app = FastAPI(title="Universal Remote Server", lifespan=lifespan)
     app.include_router(api.router)

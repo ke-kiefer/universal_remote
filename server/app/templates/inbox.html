@@ -13,8 +13,8 @@
             <optgroup label="{{ e.area or 'Ohne Raum' }}">
             {% set ns.area = e.area %}
           {% endif %}
-          <option value="{{ e.entity_id }}" data-search="{{ (e.name ~ ' ' ~ (e.area or '') ~ ' ' ~ e.entity_id)|lower }}">
-            {{ e.name }} — {{ e.entity_id }}{% if counts.get(e.entity_id) %} ({{ counts[e.entity_id] }}){% endif %}
+          <option value="{{ e.device_id }}" data-search="{{ (e.name ~ ' ' ~ (e.area or '') ~ ' ' ~ e.device_id)|lower }}">
+            {{ e.name }} — {{ e.device_id }}{% if counts.get(e.device_id) %} ({{ counts[e.device_id] }}){% endif %}
           </option>
           {% if loop.last %}</optgroup>{% endif %}
         {% endfor %}
