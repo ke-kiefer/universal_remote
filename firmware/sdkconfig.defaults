@@ -7,6 +7,8 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # CPU
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# Power management: dynamic frequency scaling (see main/power.c)
+CONFIG_PM_ENABLE=y
 
 # PSRAM: 8 MB octal (ESP32-S3R8)
 CONFIG_SPIRAM=y

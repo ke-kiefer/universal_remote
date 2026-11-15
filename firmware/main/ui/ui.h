@@ -10,7 +10,8 @@ typedef enum {
     UI_EV_IDENTIFY,     // "Erkennen" pressed
     UI_EV_TRAIN_PHOTO,  // "Foto" pressed in training mode
     UI_EV_ACTION,       // action button on the result screen, arg = action index
-    UI_EV_CHOOSE,       // candidate picked on the choose screen, arg = candidate index
+    UI_EV_CHOOSE,       // choose screen: arg = candidate index, -1 = "Keins davon"
+    UI_EV_WAKE,         // touch while the wake guard was shown (dimmed/idle)
 } ui_event_t;
 
 typedef void (*ui_event_cb_t)(ui_event_t ev, int arg);
@@ -29,6 +30,10 @@ typedef struct {
 void ui_init(ui_event_cb_t cb);
 
 void ui_set_status(const ui_status_t *st);
+
+// Invisible touch catcher over everything: the first touch after dimming only wakes the
+// device (UI_EV_WAKE) instead of pressing a button. Hides itself when that touch ends.
+void ui_set_wake_guard(bool on);
 
 // Short message at the bottom of the screen (auto-hides).
 void ui_toast(const char *text, bool error);

@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "nvs_flash.h"
+#include "power.h"
 #include <string.h>
 #include "ui.h"
 #include "wifi.h"
@@ -24,6 +25,7 @@
 static const char *TAG = "main";
 
 #define STATUS_INTERVAL_US (10 * 1000000LL)
+#define STATUS_INTERVAL_IDLE_US (60 * 1000000LL)  // fewer requests while idle
 
 typedef struct {
     ui_event_t type;
@@ -38,6 +40,7 @@ static int s_sent;
 // Last identify result: needed for actions, the choose screen and feedback.
 static api_identify_t s_ident;
 static api_entity_view_t s_view;
+static bool s_feedback_sent;  // at most one feedback per identify
 
 static void on_ui_event(ui_event_t ev, int arg)
 {
@@ -153,6 +156,7 @@ static void identify(void)
              wifi_get_rssi());
     int64_t t_up = esp_timer_get_time();
     size_t len = fb->len;
+    s_feedback_sent = false;
     esp_err_t err = api_identify(fb->buf, fb->len, meta, &s_ident);
     camera_release(fb);
     int64_t t_end = esp_timer_get_time();
@@ -197,19 +201,36 @@ static void run_action(int idx)
         s_view.n_actions = upd.n_actions;
         memcpy(s_view.actions, upd.actions, sizeof(s_view.actions));
         ui_update_result(&s_view);
-    } else {
-        ui_toast("Aktion fehlgeschlagen", true);
+        ui_result_busy(false);
+        // Using an action on a match confirms the recognition implicitly: send the capture
+        // as training image once (the server skips near-duplicates). Leaving with "Zurück"
+        // without an action sends nothing, since that hints at a wrong recognition.
+        if (!s_feedback_sent && s_ident.capture_id[0]) {
+            s_feedback_sent = true;
+            api_feedback(s_ident.capture_id, s_view.entity.entity_id, "action");
+        }
+        return;
     }
+    ui_toast("Aktion fehlgeschlagen", true);
     ui_result_busy(false);
 }
 
 static void choose(int idx)
 {
-    if (idx < 0 || idx >= s_ident.n_candidates) return;
+    if (idx < 0) {
+        // "Keins davon": keep the capture in the inbox for manual labeling.
+        ui_show_home();
+        if (api_feedback(s_ident.capture_id, NULL, "none") == ESP_OK) {
+            ui_toast("Bild zum Zuordnen gespeichert", false);
+        }
+        return;
+    }
+    if (idx >= s_ident.n_candidates) return;
     const api_entity_t *c = &s_ident.candidates[idx];
     ui_show_busy("Lade …");
     // Feedback first: the confirmed capture becomes a training image (improves the index).
-    if (api_feedback(s_ident.capture_id, c->entity_id) != ESP_OK) {
+    s_feedback_sent = true;
+    if (api_feedback(s_ident.capture_id, c->entity_id, "choose") != ESP_OK) {
         ESP_LOGW(TAG, "feedback for %s failed", c->entity_id);
     }
     if (api_entity(c->entity_id, &s_view) != ESP_OK) {
@@ -242,13 +263,21 @@ static void app_task(void *arg)
             case UI_EV_CHOOSE:
                 choose(ev.arg);
                 break;
+            case UI_EV_WAKE:
+                power_wake();
+                break;
             }
+            // Requests can take seconds: count inactivity from when they are done.
+            power_kick();
         }
+        power_update();
         // Refresh the status bar periodically and immediately on WLAN state changes.
         bool connected = wifi_is_connected();
         if (connected != was_connected || esp_timer_get_time() >= next_status) {
             was_connected = connected;
-            next_status = esp_timer_get_time() + STATUS_INTERVAL_US;
+            next_status = esp_timer_get_time() + (power_state() == POWER_IDLE
+                                                      ? STATUS_INTERVAL_IDLE_US
+                                                      : STATUS_INTERVAL_US);
             update_status();
         }
     }
@@ -278,6 +307,7 @@ void app_main(void)
     s_camera_ok = camera_init() == ESP_OK;
     if (!s_camera_ok) ui_toast("Kamera-Init fehlgeschlagen", true);
 
+    power_init();
     xTaskCreate(app_task, "app", 8192, NULL, 4, NULL);
     ESP_LOGI(TAG, "ready");
 }

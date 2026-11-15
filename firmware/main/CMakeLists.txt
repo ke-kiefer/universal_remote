@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
+        "power.c"
         "board/board.c"
         "board/battery.c"
         "board/camera.c"
@@ -18,6 +19,7 @@ idf_component_register(
         esp_lcd
         esp_timer
         esp_psram
+        esp_pm
         esp_wifi
         esp_netif
         esp_event

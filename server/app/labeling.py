@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 
 from .actions import SUPPORTED_DOMAINS
 from .ha import HAError
+from .storage import is_feedback_image
 
 log = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -122,12 +123,14 @@ async def entities_page(request: Request, msg: str | None = None):
     entities, ha_error = await ha_entities(request, filtered=False)
     names = {e.entity_id: e for e in entities}
     counts = storage.entity_counts()
+    fb_counts = storage.feedback_counts()
     rows = [
         {
             "entity_id": eid,
             "name": names[eid].name if eid in names else "",
             "area": names[eid].area if eid in names else "",
             "count": n,
+            "feedback": fb_counts.get(eid, 0),
             "missing": bool(entities) and eid not in names,
         }
         for eid, n in sorted(counts.items())
@@ -148,11 +151,28 @@ async def entities_page(request: Request, msg: str | None = None):
 
 
 @router.get("/label/entity/{entity_id}")
-async def entity_page(request: Request, entity_id: str, msg: str | None = None):
+async def entity_page(
+    request: Request, entity_id: str, msg: str | None = None, only: str | None = None
+):
     storage = request.app.state.storage
-    images = [storage.rel(p) for eid, p in storage.labeled_images() if eid == entity_id]
+    images = [
+        {"rel": storage.rel(p), "feedback": is_feedback_image(p)}
+        for eid, p in storage.labeled_images()
+        if eid == entity_id
+    ]
+    n_feedback = sum(i["feedback"] for i in images)
+    if only == "fb":
+        images = [i for i in images if i["feedback"]]
     return templates.TemplateResponse(
-        request, "entity.html", {"entity_id": entity_id, "images": images, "msg": msg}
+        request,
+        "entity.html",
+        {
+            "entity_id": entity_id,
+            "images": images,
+            "n_feedback": n_feedback,
+            "only_fb": only == "fb",
+            "msg": msg,
+        },
     )
 
 

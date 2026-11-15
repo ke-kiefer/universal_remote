@@ -8,6 +8,11 @@
 // Initialize the OV5640 in JPEG mode with settings from .env, discard warm-up frames.
 esp_err_t camera_init(void);
 
+// Software standby (registers and AF firmware are kept, XCLK stopped) and wake-up.
+// Capture/AF functions wake the camera automatically if needed.
+void camera_sleep(void);
+void camera_wake(void);
+
 // Autofocus (OV5640 AF firmware, loaded in camera_init).
 typedef struct {
     bool available;  // AF firmware loaded

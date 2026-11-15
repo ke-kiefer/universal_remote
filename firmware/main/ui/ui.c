@@ -45,6 +45,7 @@ static lv_obj_t *s_home_info;
 static lv_obj_t *s_train_btn, *s_train_btn_label, *s_train_back;
 static lv_obj_t *s_train_count, *s_train_detail, *s_train_spinner;
 static lv_obj_t *s_toast;
+static lv_obj_t *s_wake_guard;
 static lv_timer_t *s_toast_timer;
 static lv_obj_t *s_busy, *s_busy_label;
 static lv_obj_t *s_result, *s_res_name, *s_res_info, *s_res_conf, *s_res_actions, *s_res_back;
@@ -146,6 +147,18 @@ static void on_action(lv_event_t *e)
 static void on_choose(lv_event_t *e)
 {
     if (s_cb) s_cb(UI_EV_CHOOSE, (int)(intptr_t)lv_event_get_user_data(e));
+}
+
+// Invisible full-screen layer while dimmed/idle: the waking touch must not hit a button.
+// Hidden again when that touch is released.
+static void on_wake_guard(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESSED) {
+        if (s_cb) s_cb(UI_EV_WAKE, 0);
+    } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        lv_obj_add_flag(s_wake_guard, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void toast_hide(lv_timer_t *t)
@@ -293,7 +306,7 @@ static void build_choose(void)
     lv_obj_t *none =
         make_button(s_choose, 224, 40, COLOR_SECONDARY, "Keins davon", s_font_s, NULL);
     lv_obj_align(none, LV_ALIGN_BOTTOM_MID, 0, -6);
-    lv_obj_add_event_cb(none, on_home, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(none, on_choose, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
 }
 
 void ui_init(ui_event_cb_t cb)
@@ -309,12 +322,29 @@ void ui_init(ui_event_cb_t cb)
     build_busy();
     build_result();
     build_choose();
+    s_wake_guard = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_wake_guard);
+    lv_obj_set_size(s_wake_guard, LV_PCT(100), LV_PCT(100));
+    lv_obj_add_flag(s_wake_guard, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_wake_guard, on_wake_guard, LV_EVENT_ALL, NULL);
     lv_screen_load(s_home);
     lvgl_port_unlock();
     ESP_LOGI(TAG, "ready");
 }
 
 // --- public updates (any task) ------------------------------------------------------------
+
+void ui_set_wake_guard(bool on)
+{
+    if (!lvgl_port_lock(0)) return;
+    if (on) {
+        lv_obj_remove_flag(s_wake_guard, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_wake_guard);
+    } else {
+        lv_obj_add_flag(s_wake_guard, LV_OBJ_FLAG_HIDDEN);
+    }
+    lvgl_port_unlock();
+}
 
 void ui_set_status(const ui_status_t *st)
 {

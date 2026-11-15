@@ -20,6 +20,7 @@ import numpy as np
 
 from .config import Settings
 from .index import Thresholds, VectorIndex, classify
+from .storage import is_feedback_image
 
 TARGET_PRECISION = 0.95
 
@@ -81,6 +82,7 @@ def evaluate(index: VectorIndex, settings: Settings) -> dict:
         "config": index.config,
         "top_m": settings.top_m,
         "n_images": n,
+        "n_feedback": sum(1 for f in set(index.files) if is_feedback_image(f)),
         "n_entities": len(usable),
         "top1_accuracy": float(correct.mean()),
         "top3_accuracy": float(top3),
@@ -149,7 +151,10 @@ def print_report(r: dict) -> None:
         print(r["error"])
         return
     print(f"Config: {r['config']}  top_m={r['top_m']}")
-    print(f"{r['n_images']} images, {r['n_entities']} entities")
+    print(
+        f"{r['n_images']} images, {r['n_entities']} entities "
+        f"({r.get('n_feedback', 0)} feedback images in the index)"
+    )
     print(f"Top-1 accuracy: {r['top1_accuracy']:.1%}   Top-3: {r['top3_accuracy']:.1%}")
     print(f"Scores correct: {r['score_stats']['correct']}")
     print(f"Scores wrong:   {r['score_stats']['wrong']}")
@@ -178,6 +183,11 @@ def main() -> None:
     ap.add_argument("--pooling", choices=["cls", "cls_mean"])
     ap.add_argument("--top-m", type=int)
     ap.add_argument("--no-save", action="store_true", help="do not write data/model/eval.json")
+    ap.add_argument(
+        "--manual-only",
+        action="store_true",
+        help="ignore training images that came from the remote's feedback (*_fb.jpg)",
+    )
     args = ap.parse_args()
 
     overrides = {
@@ -201,9 +211,11 @@ def main() -> None:
         rec = Recognizer(settings, storage, emb)
         items = [(e, storage.rel(p), p) for e, p in storage.labeled_images()]
         index = VectorIndex.build(items, rec.embed, emb.config_key, emb.scales)
+    if args.manual_only:
+        index = index.without_files(is_feedback_image)
     report = evaluate(index, settings)
     print_report(report)
-    is_current = all(v is None for v in overrides.values())
+    is_current = all(v is None for v in overrides.values()) and not args.manual_only
     if not args.no_save and is_current:
         save_report(report, storage)
 

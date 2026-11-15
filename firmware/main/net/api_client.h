@@ -63,8 +63,10 @@ esp_err_t api_identify(const uint8_t *jpeg, size_t len, const char *meta, api_id
 // POST /api/action {entity_id, action}. On success `view` holds the new state and actions.
 esp_err_t api_action(const char *entity_id, const char *action, api_entity_view_t *view);
 
-// POST /api/feedback {capture_id, entity_id}: the capture becomes a training image.
-esp_err_t api_feedback(const char *capture_id, const char *entity_id);
+// POST /api/feedback {capture_id, entity_id, source}: the capture becomes a training image
+// (server skips near-duplicates). entity_id NULL = "none of these": capture goes to the inbox.
+// source: "choose" (candidate picked), "action" (action used on a match), "none".
+esp_err_t api_feedback(const char *capture_id, const char *entity_id, const char *source);
 
 // GET /api/entity/{id}: current state and actions.
 esp_err_t api_entity(const char *entity_id, api_entity_view_t *view);

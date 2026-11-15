@@ -79,6 +79,7 @@ def settings(tmp_path) -> Settings:
         match_threshold=0.9,
         margin_threshold=0.02,
         unknown_threshold=0.5,
+        action_state_timeout_ms=300,
     )
 
 

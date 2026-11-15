@@ -16,6 +16,12 @@ ENTITY_RE = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 DEVICE_RE = re.compile(r"[^A-Za-z0-9_-]")
 IMAGE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 THUMB_SIZE = (240, 180)
+# Training images that came from the remote's feedback (not labeled by hand).
+FEEDBACK_SUFFIX = "_fb"
+
+
+def is_feedback_image(path: Path | str) -> bool:
+    return Path(path).stem.endswith(FEEDBACK_SUFFIX)
 
 
 class InvalidImage(ValueError):
@@ -122,17 +128,29 @@ class Storage:
                 moved.append(target)
         return moved
 
-    def add_labeled_from_capture(self, capture_id: str, entity_id: str) -> Path:
+    def feedback_path(self, capture_id: str, entity_id: str) -> Path:
+        """Where a confirmed capture is stored as training image (marked with _fb)."""
         if not is_valid_entity_id(entity_id):
             raise ValueError(f"invalid entity id {entity_id!r}")
+        name = f"{self._check_id(capture_id)}{FEEDBACK_SUFFIX}.jpg"
+        return self.labeled / entity_id / name
+
+    def add_labeled_from_capture(self, capture_id: str, entity_id: str) -> Path:
         src = self.capture_path(capture_id)
         if src is None:
             raise FileNotFoundError(capture_id)
-        dest = self.labeled / entity_id
-        dest.mkdir(parents=True, exist_ok=True)
-        target = dest / src.name
+        target = self.feedback_path(capture_id, entity_id)
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, target)
         return target
+
+    def capture_to_inbox(self, capture_id: str) -> str:
+        """Copy an identify capture into the inbox for manual labeling."""
+        src = self.capture_path(capture_id)
+        if src is None:
+            raise FileNotFoundError(capture_id)
+        shutil.copy2(src, self.inbox / src.name)
+        return src.stem
 
     def reject_inbox(self, image_ids: list[str]) -> int:
         n = 0
@@ -182,6 +200,14 @@ class Storage:
         counts: dict[str, int] = {}
         for entity_id, _ in self.labeled_images():
             counts[entity_id] = counts.get(entity_id, 0) + 1
+        return counts
+
+    def feedback_counts(self) -> dict[str, int]:
+        """Per entity: how many training images came from the remote's feedback."""
+        counts: dict[str, int] = {}
+        for entity_id, p in self.labeled_images():
+            if is_feedback_image(p):
+                counts[entity_id] = counts.get(entity_id, 0) + 1
         return counts
 
     def rel(self, path: Path) -> str:

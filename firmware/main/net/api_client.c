@@ -227,13 +227,26 @@ esp_err_t api_action(const char *entity_id, const char *action, api_entity_view_
     return err;
 }
 
-esp_err_t api_feedback(const char *capture_id, const char *entity_id)
+esp_err_t api_feedback(const char *capture_id, const char *entity_id, const char *source)
 {
     cJSON *req = cJSON_CreateObject();
     cJSON_AddStringToObject(req, "capture_id", capture_id);
-    cJSON_AddStringToObject(req, "entity_id", entity_id);
+    if (entity_id) {
+        cJSON_AddStringToObject(req, "entity_id", entity_id);
+    } else {
+        cJSON_AddNullToObject(req, "entity_id");
+    }
+    cJSON_AddStringToObject(req, "source", source);
     cJSON *resp = NULL;
     esp_err_t err = post_json("/api/feedback", req, TIMEOUT_ACTION_MS, &resp);
+    if (err == ESP_OK) {
+        const cJSON *added = cJSON_GetObjectItem(resp, "added");
+        const cJSON *reason = cJSON_GetObjectItem(resp, "reason");
+        ESP_LOGI(TAG, "feedback (%s) -> %s: %s", source, entity_id ? entity_id : "inbox",
+                 cJSON_IsTrue(added)        ? "added"
+                 : cJSON_IsString(reason)   ? reason->valuestring
+                                            : "ok");
+    }
     cJSON_Delete(req);
     cJSON_Delete(resp);
     return err;

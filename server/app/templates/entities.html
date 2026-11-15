@@ -20,13 +20,14 @@
   <h2>Entities</h2>
   {% if rows %}
   <table>
-    <tr><th>Entity</th><th>Name</th><th>Raum</th><th class="num">Bilder</th></tr>
+    <tr><th>Entity</th><th>Name</th><th>Raum</th><th class="num">Bilder</th><th class="num" title="davon automatisch per Rückmeldung der Fernbedienung übernommen">Rückmeldung</th></tr>
     {% for r in rows %}
       <tr>
         <td><a href="/label/entity/{{ r.entity_id }}"><code>{{ r.entity_id }}</code></a>
           {% if r.missing %}<span style="color:var(--bad)" title="Entity existiert nicht (mehr) in HA">⚠</span>{% endif %}</td>
         <td>{{ r.name }}</td><td>{{ r.area or "" }}</td>
         <td class="num" {% if r.count < 10 %}style="color:var(--warn)" title="Empfehlung: 10–30 Bilder"{% endif %}>{{ r.count }}</td>
+        <td class="num">{% if r.feedback %}<a href="/label/entity/{{ r.entity_id }}?only=fb">{{ r.feedback }}</a>{% else %}<span class="muted">0</span>{% endif %}</td>
       </tr>
     {% endfor %}
   </table>

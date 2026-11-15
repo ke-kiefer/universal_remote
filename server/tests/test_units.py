@@ -212,3 +212,11 @@ def test_media_player_actions():
     assert [a.id for a in act.available_actions("media_player.x", no_power)] == ["play_pause"]
     with pytest.raises(act.UnsupportedAction):
         act.resolve("media_player.tv", "vol_up", full)
+
+
+def test_index_without_files():
+    data = {"a": ("light.a", _vec(1, 0, 0)), "b_fb": ("light.a", _vec(0, 1, 0))}
+    idx = VectorIndex.build([(e, f, f) for f, (e, _) in data.items()], lambda f: data[f][1],
+                            {}, [1.0])  # fmt: skip
+    sub = idx.without_files(lambda f: f.endswith("_fb"))
+    assert sub.files == ["a"] and sub.vectors.shape == (1, 3) and idx.n_images == 2

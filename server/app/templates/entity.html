@@ -1,20 +1,29 @@
 {% extends "base.html" %}
 {% block title %}{{ entity_id }} – Universal Remote{% endblock %}
 {% block content %}
-<h2><code>{{ entity_id }}</code> <span class="muted">({{ images|length }} Bilder)</span></h2>
+<h2><code>{{ entity_id }}</code>
+  <span class="muted">({{ images|length }} Bilder{% if only_fb %}, nur Rückmeldungen{% elif n_feedback %}, davon {{ n_feedback }} per Rückmeldung{% endif %})</span></h2>
 <form method="post" action="/label/delete">
   <input type="hidden" name="entity_id" value="{{ entity_id }}">
   <div class="bar">
     <button type="submit" class="danger" onclick="return confirm('Ausgewählte Bilder endgültig löschen?')">Ausgewählte löschen</button>
+    {% if only_fb %}
+      <a class="btn" href="/label/entity/{{ entity_id }}">Alle Bilder zeigen</a>
+    {% elif n_feedback %}
+      <a class="btn" href="/label/entity/{{ entity_id }}?only=fb">Nur Rückmeldungen</a>
+    {% endif %}
     <a class="btn" href="/label/entities">Zurück</a>
   </div>
+  <p class="muted">Bilder mit <span class="badge">FB</span> hat die Fernbedienung automatisch übernommen
+    (Kandidat ausgewählt oder Aktion ausgeführt). Falsch zugeordnete einfach löschen.</p>
   <div class="grid">
-    {% for rel in images %}
-      {% set id = rel.rsplit('/', 1)[1][:-4] %}
+    {% for img in images %}
+      {% set id = img.rel.rsplit('/', 1)[1][:-4] %}
       <label class="card">
         <input type="checkbox" name="ids" value="{{ id }}">
-        <img loading="lazy" src="/label/img/{{ rel }}?thumb=1" alt="">
-        <div class="cap"><span>{{ id[:15] }}</span><a href="/label/img/{{ rel }}" target="_blank" onclick="event.stopPropagation()">groß</a></div>
+        {% if img.feedback %}<span class="badge" style="position:absolute; top:6px; right:6px">FB</span>{% endif %}
+        <img loading="lazy" src="/label/img/{{ img.rel }}?thumb=1" alt="">
+        <div class="cap"><span>{{ id[:15] }}</span><a href="/label/img/{{ img.rel }}" target="_blank" onclick="event.stopPropagation()">groß</a></div>
       </label>
     {% endfor %}
   </div>

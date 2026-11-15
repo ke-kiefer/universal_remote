@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import time
@@ -42,14 +43,16 @@ async def read_jpeg(request: Request) -> bytes:
     return set_rotation(data, request.app.state.settings.image_rotation)
 
 
-async def entity_payload(request: Request, entity_id: str) -> dict:
-    """Name, area, compact state and available actions of an entity."""
+async def entity_payload(request: Request, entity_id: str, state: dict | None = None) -> dict:
+    """Name, area, compact state and available actions of an entity.
+
+    `state` = already known fresh state, otherwise it is fetched from HA."""
     ha = request.app.state.ha
-    try:
-        state = await ha.state(entity_id)
-    except HAError as e:
-        log.warning("HA state for %s failed: %s", entity_id, e)
-        state = None
+    if state is None:
+        try:
+            state = await ha.state(entity_id)
+        except HAError as e:
+            log.warning("HA state for %s failed: %s", entity_id, e)
     info = await ha.entity_info(entity_id, state)
     return {
         "entity": {
@@ -145,6 +148,41 @@ async def identify(request: Request, device: str = Query("remote")):
     return resp
 
 
+def state_changed(before: dict, after: dict | None) -> bool:
+    if not after:
+        return False
+    if after.get("last_updated") and after.get("last_updated") != before.get("last_updated"):
+        return True
+    return (after.get("state"), after.get("attributes")) != (
+        before.get("state"),
+        before.get("attributes"),
+    )
+
+
+async def state_after_action(
+    ha, entity_id: str, before: dict, changed: list, timeout_ms: int
+) -> tuple[dict | None, int]:
+    """New state after a service call, plus how long we waited for it (ms).
+
+    HA's service response lists the states changed during the call, but many devices
+    (Zigbee, Hue, WiFi) confirm asynchronously afterwards. Then poll until the state
+    changes or the timeout passes (e.g. "brighter" at 100 % changes nothing)."""
+    t0 = time.perf_counter()
+    for s in changed if isinstance(changed, list) else []:
+        if isinstance(s, dict) and s.get("entity_id") == entity_id and state_changed(before, s):
+            return s, 0
+    deadline = t0 + timeout_ms / 1000
+    state = None
+    while True:
+        try:
+            state = await ha.state(entity_id)
+        except HAError as e:
+            log.warning("HA state for %s failed: %s", entity_id, e)
+        if state_changed(before, state) or time.perf_counter() >= deadline:
+            return state, round((time.perf_counter() - t0) * 1000)
+        await asyncio.sleep(0.15)
+
+
 class ActionRequest(BaseModel):
     entity_id: str
     action: str
@@ -166,11 +204,21 @@ async def action(request: Request, body: ActionRequest):
     except act.UnsupportedAction as e:
         raise HTTPException(400, str(e)) from e
     try:
-        await ha.call_service(domain, service, data)
+        changed = await ha.call_service(domain, service, data)
     except HAError as e:
         raise HTTPException(502, str(e)) from e
-    log.info("action %s %s -> %s.%s", body.entity_id, body.action, domain, service)
-    p = await entity_payload(request, body.entity_id)
+    timeout = request.app.state.settings.action_state_timeout_ms
+    new_state, waited = await state_after_action(ha, body.entity_id, state, changed, timeout)
+    log.info(
+        "action %s %s -> %s.%s, state %s after %d ms",
+        body.entity_id,
+        body.action,
+        domain,
+        service,
+        "updated" if state_changed(state, new_state) else "unchanged",
+        waited,
+    )
+    p = await entity_payload(request, body.entity_id, new_state)
     return {
         "ok": True,
         "state": p["state"],
@@ -181,21 +229,44 @@ async def action(request: Request, body: ActionRequest):
 
 class FeedbackRequest(BaseModel):
     capture_id: str
-    entity_id: str
+    # None = "none of these": the capture goes to the inbox for manual labeling.
+    entity_id: str | None = None
+    # How the user confirmed it: "choose" (picked a candidate), "action" (used an action
+    # on a match), "none". Only logged.
+    source: str = "choose"
 
 
 @router.post("/feedback")
 async def feedback(request: Request, body: FeedbackRequest):
+    storage = request.app.state.storage
+    rec = request.app.state.recognizer
+    try:
+        capture = storage.capture_path(body.capture_id)
+    except ValueError:
+        capture = None
+    if capture is None:
+        raise HTTPException(404, f"unknown capture {body.capture_id}")
+
+    if body.entity_id is None:
+        image_id = storage.capture_to_inbox(body.capture_id)
+        log.info("feedback %s (%s) -> inbox", body.capture_id, body.source)
+        return {"ok": True, "added": False, "inbox": image_id}
+
     if not is_valid_entity_id(body.entity_id):
         raise HTTPException(400, "invalid entity_id")
-    storage = request.app.state.storage
-    try:
-        path = storage.add_labeled_from_capture(body.capture_id, body.entity_id)
-    except (FileNotFoundError, ValueError) as e:
-        raise HTTPException(404, f"unknown capture {body.capture_id}") from e
-    await run_in_threadpool(request.app.state.recognizer.add_labeled, body.entity_id, path)
-    log.info("feedback %s -> %s", body.capture_id, body.entity_id)
-    return {"ok": True}
+    if storage.feedback_path(body.capture_id, body.entity_id).exists():
+        return {"ok": True, "added": False, "reason": "exists"}
+    vecs = await run_in_threadpool(rec.embed, capture)
+    sim = rec.max_similarity(body.entity_id, vecs)
+    if sim >= request.app.state.settings.feedback_dedup_threshold:
+        log.info("feedback %s -> %s skipped (duplicate, sim %.3f)", body.capture_id,
+                 body.entity_id, sim)  # fmt: skip
+        return {"ok": True, "added": False, "reason": "duplicate", "similarity": round(sim, 3)}
+    path = storage.add_labeled_from_capture(body.capture_id, body.entity_id)
+    await run_in_threadpool(rec.add_labeled, body.entity_id, path, vecs)
+    log.info("feedback %s (%s) -> %s, max sim to existing %.3f", body.capture_id, body.source,
+             body.entity_id, sim)  # fmt: skip
+    return {"ok": True, "added": True}
 
 
 @router.get("/entity/{entity_id}")

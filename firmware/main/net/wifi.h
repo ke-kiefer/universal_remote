@@ -18,3 +18,6 @@ void wifi_get_ip(char *buf, size_t len);
 
 // RSSI in dBm, 0 if not connected.
 int wifi_get_rssi(void);
+
+// Modem sleep on/off (off by default: weak signal, latency). Used while the device is idle.
+void wifi_set_power_save(bool on);

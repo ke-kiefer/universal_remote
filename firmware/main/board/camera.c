@@ -2,6 +2,7 @@
 
 #include "app_env.h"
 #include "board_pins.h"
+#include "driver/ledc.h"
 #include "esp_camera_af.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -24,6 +25,14 @@ static const char *TAG = "camera";
 #define AF_STATUS_FOCUSED 0x10
 #define AF_STATUS_IDLE 0x70
 
+// System control: bit 6 = software power down (standby). Registers and the AF firmware in
+// the sensor's MCU RAM are kept, so waking up is fast (no 4 s AF firmware reload).
+#define REG_SYSTEM_CTRL0 0x3008
+#define SYSTEM_CTRL0_PWDN 0x40
+#define WAKE_DISCARD_FRAMES 2
+
+static bool s_ready;
+static bool s_sleeping;
 static bool s_af_ok;
 static int64_t s_af_start_us;
 
@@ -137,11 +146,45 @@ esp_err_t camera_init(void)
     int frame_ms = (int)((esp_timer_get_time() - tf) / 1000 / WARMUP_FRAMES);
     ESP_LOGI(TAG, "ready after %lld ms, ~%d ms per frame (~%d fps)",
              (esp_timer_get_time() - t0) / 1000, frame_ms, frame_ms ? 1000 / frame_ms : 0);
+    s_ready = true;
     return ESP_OK;
+}
+
+void camera_sleep(void)
+{
+    if (!s_ready || s_sleeping) return;
+    sensor_t *s = esp_camera_sensor_get();
+    // Standby first (needs XCLK for SCCB), then stop XCLK.
+    s->set_reg(s, REG_SYSTEM_CTRL0, SYSTEM_CTRL0_PWDN, SYSTEM_CTRL0_PWDN);
+    ledc_timer_pause(LEDC_LOW_SPEED_MODE, BOARD_CAM_LEDC_TIMER);
+    s_sleeping = true;
+    ESP_LOGI(TAG, "standby");
+}
+
+void camera_wake(void)
+{
+    if (!s_ready || !s_sleeping) return;
+    int64_t t0 = esp_timer_get_time();
+    ledc_timer_resume(LEDC_LOW_SPEED_MODE, BOARD_CAM_LEDC_TIMER);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    sensor_t *s = esp_camera_sensor_get();
+    s->set_reg(s, REG_SYSTEM_CTRL0, SYSTEM_CTRL0_PWDN, 0);
+    s_sleeping = false;
+    // Let exposure settle and flush the frame captured before standby.
+    for (int i = 0; i < WAKE_DISCARD_FRAMES; i++) {
+        camera_fb_t *fb = esp_camera_fb_get();
+        if (fb) esp_camera_fb_return(fb);
+    }
+#ifdef APP_AF_MODE_CONTINUOUS
+    if (s_af_ok) af_command(AF_MAIN_CONTINUOUS);
+#endif
+    ESP_LOGI(TAG, "awake after %lld ms, AF status 0x%02x", (esp_timer_get_time() - t0) / 1000,
+             s_af_ok ? af_read(AF_FW_STATUS) : 0);
 }
 
 esp_err_t camera_af_start(void)
 {
+    camera_wake();  // normally already awake (power manager), just in case
     if (!s_af_ok) return ESP_ERR_NOT_SUPPORTED;
     s_af_start_us = esp_timer_get_time();
 #ifdef APP_AF_MODE_SINGLE
@@ -179,6 +222,7 @@ camera_af_result_t camera_af_wait(int timeout_ms)
 
 camera_fb_t *camera_capture(void)
 {
+    camera_wake();
     int64_t t0 = esp_timer_get_time();
     // With fb_count = 1 and GRAB_LATEST, drop the buffered frame so the image is taken now.
     camera_fb_t *stale = esp_camera_fb_get();

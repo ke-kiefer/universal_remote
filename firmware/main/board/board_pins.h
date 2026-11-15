@@ -32,7 +32,9 @@
 #define BOARD_TOUCH_I2C_PORT    I2C_NUM_0           // EXAMPLE_I2C_NUM
 #define BOARD_TOUCH_PIN_SDA     GPIO_NUM_48         // EXAMPLE_PIN_NUM_I2C_SDA
 #define BOARD_TOUCH_PIN_SCL     GPIO_NUM_47         // EXAMPLE_PIN_NUM_I2C_SCL
-#define BOARD_TOUCH_PIN_INT     GPIO_NUM_NC         // demo: int_gpio_num = -1
+#define BOARD_TOUCH_PIN_INT     GPIO_NUM_NC         // demo: -1; schematic: TP_INT = GPIO46 (unused)
+#define BOARD_IMU_PIN_INT1      GPIO_NUM_3          // schematic: IMU_INT1 = IO3 (RTC GPIO)
+#define BOARD_PIN_BOOT_KEY      GPIO_NUM_0          // schematic: BOOT key (RTC GPIO)
 #define BOARD_TOUCH_PIN_RST     GPIO_NUM_NC         // demo: rst_gpio_num = -1
 
 // --- Camera: DVP (OV5640 on the 24-pin FPC connector) --------------------------------------

@@ -172,3 +172,9 @@ int wifi_get_rssi(void)
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) return ap.rssi;
     return 0;
 }
+
+void wifi_set_power_save(bool on)
+{
+    esp_err_t err = esp_wifi_set_ps(on ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+    ESP_LOGI(TAG, "modem sleep %s (%s)", on ? "on" : "off", esp_err_to_name(err));
+}

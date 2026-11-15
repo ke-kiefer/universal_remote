@@ -80,7 +80,11 @@ function(app_env_generate env_file out_header)
         "AF_TIMEOUT_MS=1500"
         "AF_MODE=continuous"
         "WIFI_TX_POWER_DBM=0"
-        "BACKLIGHT_PCT=80")
+        "BACKLIGHT_PCT=80"
+        "DIM_AFTER_S=20"
+        "DIM_PCT=10"
+        "IDLE_AFTER_S=45"
+        "IDLE_WIFI_POWER_SAVE=1")
     foreach(kv IN LISTS defaults)
         string(REGEX MATCH "^([^=]+)=(.*)$" _ "${kv}")
         if(NOT ENV_${CMAKE_MATCH_1}_SET OR ENV_${CMAKE_MATCH_1} STREQUAL "")
@@ -92,7 +96,8 @@ function(app_env_generate env_file out_header)
     if(NOT ENV_CAMERA_FRAMESIZE IN_LIST framesizes)
         message(FATAL_ERROR "firmware/.env: CAMERA_FRAMESIZE must be one of: ${framesizes}")
     endif()
-    foreach(key CAMERA_JPEG_QUALITY CAMERA_XCLK_MHZ CAMERA_HMIRROR CAMERA_VFLIP AF_TIMEOUT_MS BACKLIGHT_PCT)
+    foreach(key CAMERA_JPEG_QUALITY CAMERA_XCLK_MHZ CAMERA_HMIRROR CAMERA_VFLIP AF_TIMEOUT_MS BACKLIGHT_PCT
+            DIM_AFTER_S DIM_PCT IDLE_AFTER_S IDLE_WIFI_POWER_SAVE)
         if(NOT ENV_${key} MATCHES "^[0-9]+$")
             message(FATAL_ERROR "firmware/.env: ${key} must be a number (got '${ENV_${key}}')")
         endif()
@@ -127,6 +132,10 @@ function(app_env_generate env_file out_header)
     string(APPEND h "#define APP_CAMERA_VFLIP ${ENV_CAMERA_VFLIP}\n")
     string(APPEND h "#define APP_AF_TIMEOUT_MS ${ENV_AF_TIMEOUT_MS}\n")
     string(APPEND h "#define APP_BACKLIGHT_PCT ${ENV_BACKLIGHT_PCT}\n")
+    string(APPEND h "#define APP_DIM_AFTER_S ${ENV_DIM_AFTER_S}\n")
+    string(APPEND h "#define APP_DIM_PCT ${ENV_DIM_PCT}\n")
+    string(APPEND h "#define APP_IDLE_AFTER_S ${ENV_IDLE_AFTER_S}\n")
+    string(APPEND h "#define APP_IDLE_WIFI_POWER_SAVE ${ENV_IDLE_WIFI_POWER_SAVE}\n")
     string(TOUPPER "${ENV_AF_MODE}" AF_MODE_UP)
     string(APPEND h "#define APP_AF_MODE_${AF_MODE_UP} 1\n")
     string(APPEND h "#define APP_AF_MODE_NAME \"${ENV_AF_MODE}\"\n")

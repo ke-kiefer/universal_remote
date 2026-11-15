@@ -81,6 +81,18 @@ class VectorIndex:
                 self.entities.append(entity_id)
                 self.scales.append(s)
 
+    def without_files(self, pred) -> VectorIndex:
+        """Copy of the index without the rows whose file matches pred(file)."""
+        keep = [i for i, f in enumerate(self.files) if not pred(f)]
+        return VectorIndex(
+            config=self.config,
+            vectors=self.vectors[keep] if keep else np.zeros((0, 0), np.float32),
+            files=[self.files[i] for i in keep],
+            entities=[self.entities[i] for i in keep],
+            scales=[self.scales[i] for i in keep],
+            created=self.created,
+        )
+
     def remove_files(self, rels: set[str]) -> None:
         with self._lock:
             keep = [i for i, f in enumerate(self.files) if f not in rels]

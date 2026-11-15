@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     ha_url: str = "http://homeassistant.local:8123"
     ha_token: str = ""
     ha_cache_seconds: int = 300
+    # After an action, wait up to this long for HA to report the new state (devices often
+    # confirm asynchronously, a few hundred ms after the service call returns).
+    action_state_timeout_ms: int = 1500
     # Which entities the label UI offers (does not affect already labeled images).
     entity_domains: str = "light,cover,switch,input_boolean,fan,media_player,climate,scene,script"
     entity_exclude: str = ""  # comma-separated globs on entity_id or name, case-insensitive
@@ -27,6 +30,9 @@ class Settings(BaseSettings):
     # Storage
     data_dir: Path = Path("/data")
     capture_retention_days: int = 7
+    # Feedback images more similar than this to an existing image of the same entity are
+    # not stored (near-duplicates add nothing and make eval.py look too good).
+    feedback_dedup_threshold: float = 0.97
     max_upload_bytes: int = 2 * 1024 * 1024
     # Rotate uploaded images clockwise (0/90/180/270), depending on how the camera is mounted.
     image_rotation: int = 0

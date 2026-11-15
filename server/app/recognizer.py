@@ -71,6 +71,11 @@ class Recognizer:
         self.index.add(entity_id, self.storage.rel(path), vecs, self.embedder.scales)
         self.index.save(self.storage.model)
 
+    def max_similarity(self, entity_id: str, vecs: np.ndarray) -> float:
+        """Highest similarity of `vecs` to any indexed image of `entity_id` (0 if none)."""
+        scores = [s for e, s in self.index.image_scores(vecs).values() if e == entity_id]
+        return max(scores, default=0.0)
+
     def remove_labeled(self, paths: list[Path]) -> None:
         self.index.remove_files({self.storage.rel(p) for p in paths})
         self.index.save(self.storage.model)

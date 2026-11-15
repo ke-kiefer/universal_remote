@@ -78,3 +78,15 @@ def test_inbox_respects_exclude(client, settings):
     settings.entity_exclude = "light.*"
     html = client.get("/label", auth=AUTH).text
     assert "Schreibtisch" not in html and "Rollladen" in html
+
+
+def test_feedback_images_marked_in_ui(client):
+    ids = [upload(client, "/api/capture", jpeg(seed=i, noise=5)).json()["id"] for i in range(2)]
+    client.post("/label/assign", data={"entity_id": "light.desk", "ids": ids}, auth=AUTH)
+    cap = upload(client, "/api/identify", jpeg((30, 200, 30))).json()["capture_id"]
+    client.post("/api/feedback", json={"capture_id": cap, "entity_id": "light.desk"})
+    page = client.get("/label/entity/light.desk", auth=AUTH).text
+    assert "davon 1 per Rückmeldung" in page and f"{cap}_fb" in page
+    only = client.get("/label/entity/light.desk?only=fb", auth=AUTH).text
+    assert f"{cap}_fb" in only and ids[0] not in only
+    assert "?only=fb" in client.get("/label/entities", auth=AUTH).text

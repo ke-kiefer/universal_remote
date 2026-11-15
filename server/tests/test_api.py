@@ -81,8 +81,8 @@ def test_feedback_adds_training_image(client, settings):
     train(client, "cover.living", BLUE)
     cap = upload(client, "/api/identify", jpeg(GREEN)).json()["capture_id"]
     r = client.post("/api/feedback", json={"capture_id": cap, "entity_id": "switch.fan"})
-    assert r.status_code == 200
-    assert (settings.data_dir / "labeled" / "switch.fan" / f"{cap}.jpg").exists()
+    assert r.status_code == 200 and r.json()["added"] is True
+    assert (settings.data_dir / "labeled" / "switch.fan" / f"{cap}_fb.jpg").exists()
     assert client.get("/api/health").json()["entities"] == 3
     body = upload(client, "/api/identify", jpeg(GREEN, noise=4)).json()
     assert body["best"]["entity_id"] == "switch.fan"
@@ -109,6 +109,44 @@ def test_action_calls_ha_service(client, ha_mock):
     assert r.json()["ok"] is True
 
 
+def _brighter_state(pct_255: int) -> dict:
+    from .conftest import STATES
+
+    s = {**STATES["light.desk"]}
+    s["attributes"] = {**s["attributes"], "brightness": pct_255}
+    return s
+
+
+def test_action_waits_for_async_state_update(client, ha_mock):
+    # HA returns no changed states, the device reports the new brightness a bit later.
+    ha_mock.post("/api/services/light/turn_on").mock(return_value=Response(200, json=[]))
+    from .conftest import STATES
+
+    old = Response(200, json=STATES["light.desk"])
+    new = Response(200, json=_brighter_state(204))
+    # 1st GET: state before the action, 2nd: still old, then the update arrives.
+    ha_mock.get("/api/states/light.desk").mock(side_effect=[old, old, new, new])
+    r = client.post("/api/action", json={"entity_id": "light.desk", "action": "brighter"})
+    assert r.status_code == 200, r.text
+    assert r.json()["state_text"] == "An · 80 %"
+
+
+def test_action_uses_service_response_state(client, ha_mock):
+    ha_mock.post("/api/services/light/turn_on").mock(
+        return_value=Response(200, json=[_brighter_state(204)])
+    )
+    r = client.post("/api/action", json={"entity_id": "light.desk", "action": "brighter"})
+    assert r.json()["state_text"] == "An · 80 %"
+
+
+def test_action_state_unchanged_gives_up(client, ha_mock):
+    # e.g. "brighter" at 100 %: nothing changes, answer after the timeout with the old state.
+    ha_mock.post("/api/services/light/turn_on").mock(return_value=Response(200, json=[]))
+    r = client.post("/api/action", json={"entity_id": "light.desk", "action": "brighter"})
+    assert r.status_code == 200
+    assert r.json()["state_text"] == "An · 60 %"
+
+
 def test_action_unsupported(client, ha_mock):
     r = client.post("/api/action", json={"entity_id": "switch.fan", "action": "brighter"})
     assert r.status_code == 400
@@ -132,3 +170,30 @@ def test_capture_accepts_diagnostic_params(client, caplog):
         r = upload(client, "/api/capture", jpeg(), device="remote1", af="ok", af_ms="420")
     assert r.status_code == 201
     assert "af=ok af_ms=420" in caplog.text
+
+
+def test_feedback_skips_duplicates_and_repeats(client, settings):
+    train(client, "light.desk", RED)
+    # Same picture as the training images -> near-duplicate, not stored.
+    cap = upload(client, "/api/identify", jpeg(RED, noise=8, seed=0)).json()["capture_id"]
+    r = client.post(
+        "/api/feedback", json={"capture_id": cap, "entity_id": "light.desk", "source": "action"}
+    )
+    assert r.json() == {"ok": True, "added": False, "reason": "duplicate", "similarity": 1.0}
+    assert client.get("/api/health").json()["images"] == 3
+
+    # A new view is stored once; a second feedback for the same capture is ignored.
+    cap = upload(client, "/api/identify", jpeg(GREEN)).json()["capture_id"]
+    first = client.post("/api/feedback", json={"capture_id": cap, "entity_id": "light.desk"})
+    again = client.post("/api/feedback", json={"capture_id": cap, "entity_id": "light.desk"})
+    assert first.json()["added"] is True
+    assert again.json() == {"ok": True, "added": False, "reason": "exists"}
+    assert client.get("/api/health").json()["images"] == 4
+
+
+def test_feedback_none_goes_to_inbox(client, settings):
+    cap = upload(client, "/api/identify", jpeg(GREEN)).json()["capture_id"]
+    r = client.post("/api/feedback", json={"capture_id": cap, "entity_id": None, "source": "none"})
+    assert r.json()["inbox"] == cap
+    assert (settings.data_dir / "inbox" / f"{cap}.jpg").exists()
+    assert client.get("/api/health").json()["images"] == 0
