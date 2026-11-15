@@ -200,3 +200,15 @@ def test_button_press():
     )
     assert act.state_text("button.haustuer_oeffnen", state) == ""
     assert act.resolve("input_button.x", "press", None)[:2] == ("input_button", "press")
+
+
+def test_media_player_actions():
+    feats = 1 | 4 | 128 | 256 | 1024 | 16384  # pause, volume, on, off, volume step, play
+    full = {"state": "playing", "attributes": {"supported_features": feats}}
+    ids = [a.id for a in act.available_actions("media_player.tv", full)]
+    assert ids == ["toggle", "play_pause"]
+    assert act.resolve("media_player.tv", "toggle", full)[:2] == ("media_player", "toggle")
+    no_power = {"state": "playing", "attributes": {"supported_features": 1 | 16384}}
+    assert [a.id for a in act.available_actions("media_player.x", no_power)] == ["play_pause"]
+    with pytest.raises(act.UnsupportedAction):
+        act.resolve("media_player.tv", "vol_up", full)

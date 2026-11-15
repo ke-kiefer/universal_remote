@@ -14,7 +14,7 @@ class Action:
 # HA supported_features bit flags (see homeassistant.components.*.const)
 COVER_OPEN, COVER_CLOSE, COVER_STOP = 1, 2, 8
 FAN_SET_SPEED = 1
-MP_PAUSE, MP_VOLUME_SET, MP_VOLUME_STEP, MP_PLAY = 1, 4, 1024, 16384
+MP_PAUSE, MP_TURN_ON, MP_TURN_OFF, MP_PLAY = 1, 128, 256, 16384
 CLIMATE_TARGET_TEMPERATURE = 1
 
 SUPPORTED_DOMAINS = {
@@ -75,10 +75,10 @@ def available_actions(entity_id: str, state: dict | None) -> list[Action]:
         return acts
     if domain == "media_player":
         acts = []
+        if has(MP_TURN_ON) or has(MP_TURN_OFF):
+            acts.append(Action("toggle", "Ein/Aus"))
         if has(MP_PLAY) or has(MP_PAUSE):
             acts.append(Action("play_pause", "Play/Pause"))
-        if has(MP_VOLUME_STEP) or has(MP_VOLUME_SET):
-            acts += [Action("vol_up", "Lauter"), Action("vol_down", "Leiser")]
         return acts
     if domain == "climate":
         if has(CLIMATE_TARGET_TEMPERATURE):
@@ -107,9 +107,8 @@ def resolve(entity_id: str, action: str, state: dict | None) -> tuple[str, str, 
         ("cover", "close"): "close_cover",
         ("fan", "faster"): "increase_speed",
         ("fan", "slower"): "decrease_speed",
+        ("media_player", "toggle"): "toggle",
         ("media_player", "play_pause"): "media_play_pause",
-        ("media_player", "vol_up"): "volume_up",
-        ("media_player", "vol_down"): "volume_down",
         ("scene", "activate"): "turn_on",
         ("script", "activate"): "turn_on",
         ("button", "press"): "press",
