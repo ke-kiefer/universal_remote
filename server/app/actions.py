@@ -27,7 +27,12 @@ SUPPORTED_DOMAINS = {
     "climate",
     "scene",
     "script",
+    "button",
+    "input_button",
 }
+
+# Domains whose HA state is only a timestamp of the last activation (not shown).
+STATELESS_DOMAINS = {"scene", "script", "button", "input_button"}
 
 DIMMABLE_COLOR_MODES = {"brightness", "color_temp", "hs", "xy", "rgb", "rgbw", "rgbww", "white"}
 
@@ -81,6 +86,8 @@ def available_actions(entity_id: str, state: dict | None) -> list[Action]:
         return []
     if domain in ("scene", "script"):
         return [Action("activate", "Aktivieren")]
+    if domain in ("button", "input_button"):
+        return [Action("press", "Auslösen")]
     return []
 
 
@@ -105,6 +112,8 @@ def resolve(entity_id: str, action: str, state: dict | None) -> tuple[str, str, 
         ("media_player", "vol_down"): "volume_down",
         ("scene", "activate"): "turn_on",
         ("script", "activate"): "turn_on",
+        ("button", "press"): "press",
+        ("input_button", "press"): "press",
     }
     if (domain, action) in simple:
         return domain, simple[(domain, action)], data
@@ -168,7 +177,7 @@ def state_text(entity_id: str, state: dict | None) -> str:
     domain = entity_id.split(".", 1)[0]
     raw = s.get("state") or ""
     parts = []
-    if domain not in ("scene", "script"):  # their state is a timestamp / on-off, not useful
+    if domain not in STATELESS_DOMAINS:
         parts.append(STATE_LABELS.get(raw, raw))
     if "brightness_pct" in s and raw == "on":
         parts.append(f"{s['brightness_pct']} %")

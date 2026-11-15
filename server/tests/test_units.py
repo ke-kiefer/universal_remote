@@ -186,3 +186,17 @@ def test_state_text():
     assert act.state_text("climate.x", clim) == "Heizen · Soll 21,5 °C · Ist 20 °C"
     assert act.state_text("scene.x", {"state": "2026-11-13T10:00:00", "attributes": {}}) == ""
     assert act.state_text("light.x", None) == ""
+
+
+def test_button_press():
+    state = {"state": "2026-11-15T08:00:00+00:00", "attributes": {"friendly_name": "Haustür"}}
+    assert [a.label for a in act.available_actions("button.haustuer_oeffnen", state)] == [
+        "Auslösen"
+    ]
+    assert act.resolve("button.haustuer_oeffnen", "press", state) == (
+        "button",
+        "press",
+        {"entity_id": "button.haustuer_oeffnen"},
+    )
+    assert act.state_text("button.haustuer_oeffnen", state) == ""
+    assert act.resolve("input_button.x", "press", None)[:2] == ("input_button", "press")
