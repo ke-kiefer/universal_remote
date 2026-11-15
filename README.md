@@ -53,7 +53,23 @@ data/       runtime data: training images, index, model cache (gitignored)
 
 ## Server quickstart
 
-Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+### Prerequisites
+
+- Python 3.12 and [uv](https://docs.astral.sh/uv/)
+- An **API key**: a shared secret of your choice that the remote sends with every
+  request and that protects the label UI. Generate one, e.g. with
+
+  ```bash
+  python -c "import secrets; print(secrets.token_urlsafe(24))"
+  ```
+
+  and put it into `server/.env` (`API_KEY=...`). The same value goes into
+  `firmware/.env` later.
+- For `ADAPTER=homeassistant`: a **long-lived access token** from Home Assistant
+  (your HA profile → Security → "Long-lived access tokens") for `HA_TOKEN`, and
+  the URL of your HA instance for `HA_URL`. Not needed with `ADAPTER=demo`.
+
+### Run
 
 ```bash
 cd server
@@ -95,8 +111,11 @@ idf.py build
 idf.py -p <PORT> flash
 ```
 
+`SERVER_URL` is the server's LAN address as seen from the remote, and `API_KEY`
+must match the one in `server/.env`.
+
 All configuration comes from `firmware/.env` and is generated into a header at
-build time — no secrets in the source. `.env` files are gitignored.
+build time.
 
 Reading ESP32 logs non-interactively:
 
