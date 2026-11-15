@@ -123,8 +123,3 @@ Reading ESP32 logs non-interactively:
 python tools/serial_log.py --port COM3 --seconds 15 --reset
 ```
 
-## More details
-
-Architecture decisions, the API contract, pin mapping, the ML approach and known
-pitfalls are documented in [CLAUDE.md](CLAUDE.md) (serves as project documentation
-and as working notes for AI tools).

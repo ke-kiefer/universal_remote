@@ -3,6 +3,9 @@
 *.env
 !.env.example
 
+# Local working notes (not part of the public repo)
+CLAUDE.md
+
 # Runtime data (images, index, model weights)
 data/
 
